@@ -18,14 +18,14 @@ The server will request readings for devices/PVs with alarm blocks from DPM at t
 The server will have a formal definition of alarm states. The defined alarm states are:
 
 - INDICATED
-  - A device's reading has exceeded alarm limits, but not all criterias have been met
+  - A device's reading has exceeded alarm limits, but not all criteria have been met
 - RAISED
-  - All criteria for the device to be alarm has been met.
+  - All criteria for the device to be alarm have been met.
 - ACKNOWLEDGED
   - A boolean that determines wether or not a user has confirmed that they are acting on the alarm
   - A device can be still be RAISED regardless of the ACKNOWLEDGE status
 - BYPASSED
-  - A device will not be RAISED even if all criteria has been met
+  - A device will not be RAISED even if all criteria have been met
 
 The server will use the `tried needed` to determine when a device should be raised and when should it should no longer be raised.
 
