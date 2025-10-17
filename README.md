@@ -63,18 +63,18 @@ An Alarms Event shall describe the state change of an ALARM
 
 #### Alarm Server to Alarm Source (DPM)
 
-TODO: Set up test ACNET device with alarms, read alarm property from DPM
-TODO: Set up test ACNET device with alarms, read alarm state from DPM
+- [ ] Set up test ACNET device with alarms, read alarm property from DPM
+- [ ] Set up test ACNET device with alarms, read alarm state from DPM
 
-TODO: Set up test EPICS device with alarms, read alarm property from DPM
-TODO: Set up test EPICS device with alarms, read alarm state from DPM
+- [ ] Set up test EPICS device with alarms, read alarm property from DPM
+- [ ] Set up test EPICS device with alarms, read alarm state from DPM
 
 #### Alarm Server to Alarm Log
 
 #### Alarm Server to Alarm Viewer
 
-TODO: API to get alarms in specified state going back specified time duration
-TODO: API to get specific alarm by name
-TODO: API to subscribe to alarm events
-TODO: API to bypass alarm
-TODO: API to acknowledge alarm
+- [ ] API to get alarms in specified state going back specified time duration
+- [ ] API to get specific alarm by name
+- [ ] API to subscribe to alarm events
+- [ ] API to bypass alarm
+- [ ] API to acknowledge alarm
