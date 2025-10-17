@@ -44,20 +44,61 @@ Defining a common terminology for referring to analogous concepts between ACNET 
     -  Indicated: Conditions are met but Alarm is BYPASSED or ACKNOWLEDGED
     -  Raised: Conditions are met and Alarm is not BYPASSED nor ACKNOWLEDGED
 
+
+#### Alarm States
+
+| State Abbreviation | State Name | Description | Operator Action Required | Priority Level |
+| :--- | :--- | :--- | :--- | :--- |
+| **N** | Normal | The monitored parameter is within its defined operating limits. The alarm is inactive. | None | Lowest |
+| **AU** | Alarm Active / Unacknowledged | The parameter has crossed an alarm limit (Hi/Lo) and the operator has **not** yet acknowledged it. This is the **highest priority state**. | **Acknowledge (ACK)** | Highest |
+| **AA** | Alarm Active / Acknowledged | The parameter is **still** outside its limits, but the operator has acknowledged the event. The alarm remains present on the display. | None (Troubleshoot) | Medium |
+| **RU** | Return-to-Normal / Unacknowledged | The parameter has returned to its normal operating range, but the operator has **not** yet acknowledged the condition clear. This state ensures cleared alarms are not missed. | **Acknowledge (ACK)** | Low |
+| **D** | Disabled / Suppressed | The alarm logic has been manually and explicitly bypassed (e.g., for maintenance, or because the device is intentionally off-line). | None (Engineering action required for exit) | Lowest (Hidden) |
+
 #### State Transitions
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Quiet
-  Quiet --> Raised: +Conditions (Bypassed-)
-  Quiet --> Indicated: +Conditions (Bypassed+)
-  Raised --> Indicated: +Bypassed (Conditions+)
-  Raised --> Quiet: +Bypassed (Conditions-)
-  Raised --> Indicated: +Acknowledged
-  Raised --> Quiet: +Acknowledged (Conditions-)
-  Indicated --> Raised: -Bypassed
-  Indicated --> Quiet: -Conditions
+    direction LR
+
+    state "Normal" as N
+    state "Active_Unacknowledged" as AU
+    state "Active_Acknowledged" as AA
+    state "ReturnToNormal_Unacknowledged" as RU
+    state "Disabled" as D
+
+    [*] --> N: "System Start / Initial Condition Clear"
+
+    %% Core Path: Normal to Active
+    N --> AU: "1. Condition Triggered (e.g., Temp > Limit)"
+    
+    %% Handling the Active Unacknowledged (AU) State
+    AU --> AA: "2. Operator Acknowledges (ACK)"
+    AU --> RU: "3. Condition Clears (Returns to Normal Range)"
+    AU --> D: "4. Operator Disables (Suppressed)"
+
+    %% Handling the Active Acknowledged (AA) State
+    AA --> N: "5. Condition Clears"
+    AA --> D: "6. Operator Disables (Suppressed)"
+
+    %% Handling the Return-to-Normal Unacknowledged (RU) State (Latch)
+    RU --> N: "7. Operator Acknowledges (ACK)"
+    RU --> AU: "8. Condition Violated Again (Re-Activate)"
+    RU --> D: "9. Operator Disables (Suppressed)"
+
+    %% Handling the Disabled (D) State
+    D --> N: "10. Operator Enables (Condition is Clear)"
+    D --> AU: "11. Operator Enables (Condition is Violated)"
+    D --> D: "12. Continued Disablement"
 ```
+
+Key Diagram Notes:
+
+Priority Shift: The transition from AU (Active / Unacknowledged) to AA (Active / Acknowledged) is the key operator action. This lowers the alarm's visual priority but keeps it present because the fault condition still exists.
+
+The Latch: The state RU (Return-to-Normal / Unacknowledged) acts as a safety latch. It ensures the operator must acknowledge the event even if the physical fault clears itself quickly, preventing missed transient events. The transition from RU to AU allows a rapid re-activation if the condition bounces immediately.
+
+Disabling: Disabling an alarm (D state) requires an engineer action and transitions back to either N or AU when re-enabled, depending on the instantaneous condition of the monitored parameter.
 
 ### Alarms Log
 
