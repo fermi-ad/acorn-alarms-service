@@ -31,8 +31,6 @@ Defining a common terminology for referring to analogous concepts between ACNET 
   - Conditions may be explicit boolean data from Devices
   - Conditions may be the states of other associated ALARMs
   - Conditions may be complex (require multiple triggers over time or constant trigger over time)
-- An ALARM may contain Devices (with Conditions)
-- An ALARM may contain other ALARMS
   
 - An ALARM is a persistent collection of states:
   - BYPASSED (boolean)
