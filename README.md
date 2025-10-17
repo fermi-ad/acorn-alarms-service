@@ -44,6 +44,19 @@ Defining a common terminology for referring to analogous concepts between ACNET 
     -  Indicated: Conditions are met but Alarm is BYPASSED or ACKNOWLEDGED
     -  Raised: Conditions are met and Alarm is not BYPASSED nor ACKNOWLEDGED
 
+#### State Transitions
+
+```mermaid
+stateDiagram-v2
+  [*] --> Quiet
+  Quiet --> Raised: +Conditions -Bypass
+  Quiet --> Indicated: +Conditions +Bypass
+  Raised --> Indicated: +Bypass
+  Raised --> Indicated: +Acknowledged
+  Indicated --> Raised: -Bypass
+  Indicated --> Quiet: -Conditions
+```
+
 ### Alarms Log
 
 The Alarms Log will be a timestamped list of Alarms Events
