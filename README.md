@@ -65,7 +65,6 @@ An Alarms Event shall describe the state change of an ALARM
 
 - [ ] Set up test ACNET device with alarms, read alarm property from DPM
 - [ ] Set up test ACNET device with alarms, read alarm state from DPM
-
 - [ ] Set up test EPICS device with alarms, read alarm property from DPM
 - [ ] Set up test EPICS device with alarms, read alarm state from DPM
 
