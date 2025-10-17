@@ -58,3 +58,13 @@ An Alarms Event shall describe the state change of an ALARM
 | New State       | New state of alarm (Quiet, Indicated or Raised)
 | Action          | Bypassed changed, Acknowledged changed, Conditions met
 | Actor           | User (for bypass and acknowledge) or Device
+
+### Interfaces
+
+#### Alarm Server to Alarm Source (DPM)
+
+#### Alarm Server to Alarm Log
+
+#### Alarm Server to Alarm Viewer
+
+
