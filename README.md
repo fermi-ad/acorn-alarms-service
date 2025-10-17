@@ -51,7 +51,8 @@ stateDiagram-v2
   [*] --> Quiet
   Quiet --> Raised: +Conditions -Bypass
   Quiet --> Indicated: +Conditions +Bypass
-  Raised --> Indicated: +Bypass
+  Raised --> Indicated: +Conditions +Bypass
+  Raised --> Quiet: -Conditions +Bypass
   Raised --> Indicated: +Acknowledged
   Indicated --> Raised: -Bypass
   Indicated --> Quiet: -Conditions
