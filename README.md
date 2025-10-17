@@ -19,10 +19,9 @@ Defining a common terminology for referring to analogous concepts between ACNET 
 | Generic   | ACNET         | EPICS
 |-----------|---------------|------
 | Node      | Node          | IOC
-| Device    | Device        | PV
-| Property  | Property      | Attribute Structure
-| Attribute | Attribute     | Field of Attribute Structure
-| Value     | Reading Value | VAL Field
+| Device    | Device        | N/A
+| Property  | Property      | PV
+| Attribute | Attribute     | Attribute
 
 ### ALARM
 
