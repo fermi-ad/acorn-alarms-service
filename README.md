@@ -26,9 +26,12 @@ Defining a common terminology for referring to analogous concepts between ACNET 
 
 ### ALARM
 
-- An ALARM notifies users when Criteria are met
-  - Criteria are conditions of Device data
-- An ALARM may contain Devices (with Criteria)
+- An ALARM notifies users when Conditions are met
+  - Conditions may be comparisons of Device data to limits
+  - Conditions may be explicit boolean data from Devices
+  - Conditions may be the states of other associated ALARMs
+  - Conditions may be complex (require multiple triggers over time or constant trigger over time)
+- An ALARM may contain Devices (with Conditions)
 - An ALARM may contain other ALARMS
   
 - An ALARM is a persistent collection of states:
@@ -39,6 +42,6 @@ Defining a common terminology for referring to analogous concepts between ACNET 
     - True: Alarm has been seen by a User and shall no longer be Raised
     - False: Alarm has not yet been seen by a User and shall be Raised
   - STATUS (enumeration)
-    -  Quiet: Criteria are not met
-    -  Indicated: Criteria are met but Alarm is BYPASSED or ACKNOWLEDGED
-    -  Raised: Criteria are met and Alarm is not BYPASSED nor ACKNOWLEDGED
+    -  Quiet: Conditions are not met
+    -  Indicated: Conditions are met but Alarm is BYPASSED or ACKNOWLEDGED
+    -  Raised: Conditions are met and Alarm is not BYPASSED nor ACKNOWLEDGED
