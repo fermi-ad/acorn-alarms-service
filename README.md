@@ -49,12 +49,13 @@ Defining a common terminology for referring to analogous concepts between ACNET 
 ```mermaid
 stateDiagram-v2
   [*] --> Quiet
-  Quiet --> Raised: +Conditions -Bypass
-  Quiet --> Indicated: +Conditions +Bypass
-  Raised --> Indicated: +Conditions +Bypass
-  Raised --> Quiet: -Conditions +Bypass
+  Quiet --> Raised: +Conditions (Bypassed-)
+  Quiet --> Indicated: +Conditions (Bypassed+)
+  Raised --> Indicated: +Bypassed (Conditions+)
+  Raised --> Quiet: +Bypassed (Conditions-)
   Raised --> Indicated: +Acknowledged
-  Indicated --> Raised: -Bypass
+  Raised --> Quiet: +Acknowledged (Conditions-)
+  Indicated --> Raised: -Bypassed
   Indicated --> Quiet: -Conditions
 ```
 
