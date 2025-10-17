@@ -43,3 +43,18 @@ Defining a common terminology for referring to analogous concepts between ACNET 
     -  Quiet: Conditions are not met
     -  Indicated: Conditions are met but Alarm is BYPASSED or ACKNOWLEDGED
     -  Raised: Conditions are met and Alarm is not BYPASSED nor ACKNOWLEDGED
+
+### Alarms Log
+
+The Alarms Log will be a timestamped list of Alarms Events
+
+### Alarms Event
+
+An Alarms Event shall describe the state change of an ALARM
+
+| Event Attribute | Description
+|-----------------|------------
+| Timestamp       | Date and Time of event
+| New State       | New state of alarm (Quiet, Indicated or Raised)
+| Action          | Bypassed changed, Acknowledged changed, Conditions met
+| Actor           | User (for bypass and acknowledge) or Device
