@@ -13,5 +13,5 @@ jobs:
     uses: fermi-ad/.github/.github/workflows/rust-integration.yaml@ccc0401ba36fba7dd1854286c5f2857e51babd70
     secrets: inherit
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
