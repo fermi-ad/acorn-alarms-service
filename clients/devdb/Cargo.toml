@@ -1,0 +1,16 @@
+[package]
+name = "devdb-client"   # <-- unique name for the subcrate
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tonic = { version = "0.12", features = ["tls"] }
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt","env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+prost-build = "0.13"

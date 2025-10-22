@@ -1,6 +1,16 @@
+[workspace]
+members = [
+  ".",              # main crate
+  "clients/devdb"   # devdb client crate
+]
+resolver = "2"
+
 [package]
 name = "acorn-alarms-service"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+devdb-client = { path = "clients/devdb" }
