@@ -19,11 +19,7 @@ async fn main() -> Result<()> {
         Ok(reply) => {
             println!("DevDB reply: {} item(s)", reply.set.len());
             for entry in reply.set.iter().take(5) {
-                println!(
-                    "• {} → {:?}",
-                    entry.name,
-                    entry.result.as_ref().map(|_| "ok or err")
-                );
+                println!("• {} → {:?}", entry.name, entry.result.as_ref().map(|_| "ok or err"));
             }
         }
         Err(e) => eprintln!("DevDB call failed: {e}"),
