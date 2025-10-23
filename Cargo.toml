@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  ".",              # main crate
-  "clients/devdb"   # devdb client crate
+  ".",             # main crate
+  "clients/devdb", # devdb client crate
 ]
 resolver = "2"
 

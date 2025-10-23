@@ -3,7 +3,6 @@ pub mod devdb {
     tonic::include_proto!("devdb");
 }
 
-// ===== New: reusable helper you can call from the server =====
 use devdb::dev_db_client::DevDbClient;
 use devdb::{DeviceInfoReply, DeviceList};
 
