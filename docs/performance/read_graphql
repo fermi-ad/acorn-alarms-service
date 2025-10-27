@@ -1,0 +1,39 @@
+#!/usr/bin/python
+
+# test script to evaluate bulk requests of device readings via GraphQL
+# typical results for 1000 devices from clx50:
+#   0.05260103195905685 sec
+#   0.08413835242390633 sec
+#   0.07015604618936777 sec
+#   0.06413871701806784 sec
+
+
+from python_graphql_client import GraphqlClient
+from time import perf_counter
+
+def main():
+  query = 'query get { acceleratorData(deviceList: ['
+
+  with open('devices.txt') as file:
+    for i, line in enumerate(file):
+      if i == 1000: break
+      line = line.strip()
+      # print(line)
+      query += '"' + line + '",'
+
+  query += ']) { data { timestamp result { ... on Scalar { scalarValue } } } } }'
+  # query += ']) { data { timestamp } } } }'
+  # print(query)
+
+  client = GraphqlClient('https://acsys-proxy.fnal.gov:8001/acsys')
+
+  start_time = perf_counter()
+
+  result = client.execute(query)
+
+  end_time = perf_counter()
+
+  # print(result)
+  print(end_time - start_time)
+
+if __name__ == '__main__': main()
