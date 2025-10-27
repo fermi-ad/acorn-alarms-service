@@ -1,0 +1,14 @@
+name: Rust Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-tests-and-coverage:
+    uses: fermi-ad/.github/.github/workflows/rust-deployment.yaml@7210757fdcfd2db77f6f9fa7a1e9905f1fb04bbf
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
