@@ -1,0 +1,39 @@
+#!/usr/bin/python
+
+# measure time to request multiple device readings via gRPC
+#
+# results (1000 devices per request)
+#  0.05260103195905685 sec
+#  0.08413835242390633 sec
+#  0.07015604618936777 sec
+#  0.06413871701806784 sec
+
+import grpc
+from proto.controls.service.DAQ.v1.DAQ_pb2 import ReadingList
+from proto.controls.service.DAQ.v1.DAQ_pb2_grpc import DAQStub
+from time import perf_counter
+
+COUNT = 1000
+
+def main():
+  devs = []
+  with open('devices.txt') as file:
+    for i, line in enumerate(file):
+      if i == COUNT: break
+      line = line.strip() + "@I"
+      # print(line)
+      devs.append(line)
+
+  rl = ReadingList(drf=devs)
+
+  with grpc.insecure_channel('dce07.fnal.gov:50051') as chan:
+    daq = DAQStub(chan)
+    tim = perf_counter()
+    r = daq.Read(rl)
+    for _ in range(COUNT):
+      # print(r.next())
+      r.next()
+    tim = perf_counter() - tim
+    print(tim)
+
+if __name__ == '__main__': main()
