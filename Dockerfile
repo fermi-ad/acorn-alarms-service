@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
 WORKDIR /app
-ADD target/release/acorn-alarm-service /app/acorn-alarm-service
+ADD target/release/acorn-alarms-service /app/acorn-alarms-service
 EXPOSE 6802
-CMD [ "./acorn-alarm-service" ]
+CMD [ "./acorn-alarms-service" ]
