@@ -12,24 +12,34 @@ from python_graphql_client import GraphqlClient
 from time import perf_counter
 
 def main():
-  query = 'query get { acceleratorData(deviceList: ['
+  # query = 'query get { acceleratorData(deviceList: ['
+  devs = []
 
   with open('devices.txt') as file:
     for i, line in enumerate(file):
       if i == 1000: break
       line = line.strip()
+      devs.append(line)
       # print(line)
-      query += '"' + line + '",'
+      # query += '"' + line + '",'
 
-  query += ']) { data { timestamp result { ... on Scalar { scalarValue } } } } }'
+  # query += ']) { data { timestamp result { ... on Scalar { scalarValue } } } } }'
   # query += ']) { data { timestamp } } } }'
   # print(query)
+
+  query = ''' query get($dl: [String!]!) {
+                acceleratorData(deviceList: $dl) {
+                  data {
+                    timestamp result {
+                      ... on Scalar { scalarValue }
+              } } } } '''
 
   client = GraphqlClient('https://acsys-proxy.fnal.gov:8001/acsys')
 
   start_time = perf_counter()
 
-  result = client.execute(query)
+  # result = client.execute(query)
+  result = client.execute(query, devs)
 
   end_time = perf_counter()
 
