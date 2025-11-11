@@ -1,17 +1,17 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const DAQ_PROTO: &str =
-        "../../interface-definitions/services/dpm/proto/DAQ.proto";
+    const IOC_ALARMS_PROTO: &str =
+        "../../interface-definitions/services/ioc_alarms/proto/ioc_alarms.proto";
 
-    println!("cargo:rerun-if-changed={DAQ_PROTO}");
+    println!("cargo:rerun-if-changed={IOC_ALARMS_PROTO}");
     println!("cargo:rerun-if-changed=../../interface-definitions/proto");
 
     tonic_build::configure()
         .build_server(false)
         .compile(
-            &[DAQ_PROTO],
+            &[IOC_ALARMS_PROTO],
             &[
                 "../../interface-definitions",
-                "../../interface-definitions/services/dpm/proto",
+                "../../interface-definitions/services/ioc_alarms/proto",
             ],
         )?;
 

@@ -1,16 +1,32 @@
 [workspace]
 members = [
-  ".",             # main crate
-  "clients/devdb", # devdb client crate
+  ".",
+  "clients/devdb",
+  "clients/dpm",
+  "clients/ioc_alarms",
 ]
 resolver = "2"
 
 [package]
 name = "acorn-alarms-service"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tonic = "0.11"
+prost = "0.12"
+
+# local clients
 devdb-client = { path = "clients/devdb" }
+dpm-client = { path = "clients/dpm", optional = true }
+ioc-alarms-client = { path = "clients/ioc_alarms", optional = true }
+
+[features]
+default = ["mock"]
+mock = ["dpm-client"]
+dpm-live = ["dpm-client"]
+ioc-live = ["ioc-alarms-client"]
