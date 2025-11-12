@@ -8,7 +8,9 @@ tonic = { version = "0.11", features = ["transport", "tls"] }
 prost = "0.12"
 prost-types = "0.12"
 tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
 
 [build-dependencies]
 tonic-build = { version = "0.11", features = ["prost"] }
 protoc-bin-vendored = "3"
+

@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
 
     println!("Connecting to DevDB at {endpoint} for {:?}", devices);
 
-    match devdb_client::fetch_device_info(&endpoint, &devices).await {
+    match devdb_client::fetch_device_info(&endpoint, devices).await {
         Ok(reply) => {
             println!("DevDB reply: {} item(s)", reply.set.len());
             for entry in reply.set.iter().take(5) {

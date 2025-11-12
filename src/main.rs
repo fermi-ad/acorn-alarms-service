@@ -1,8 +1,12 @@
 #[cfg(feature = "dpm-live")]
-use dpm_client::fetch_dpm_readings;
+// old: use dpm_client::fetch_dpm_readings;
+use dpm_client::fetch_readings as fetch_dpm_readings;
 
-#[cfg(feature = "mock")]
-use dpm_client::load_mock;
+#[cfg(feature = "ioc-live")]
+use ioc_alarms_client::fetch_ioc_alarm;
+
+// old: #[cfg(feature = "mock")]
+// old: use dpm_client::load_mock;
 
 use anyhow::Result;
 
@@ -25,7 +29,7 @@ async fn main() -> Result<()> {
 
     let mut _devdb_reply = None;
 
-    match devdb_client::fetch_device_info(&endpoint, &devices).await {
+    match devdb_client::fetch_device_info(&endpoint, devices.clone()).await {
         Ok(reply) => {
             println!("DevDB reply: {} item(s)", reply.set.len());
             for entry in &reply.set {
@@ -44,19 +48,22 @@ async fn main() -> Result<()> {
                             .map(|s| s.as_str())
                             .unwrap_or("-");
 
-                        let r_range = r
-                            .map(|p| format!("[{}, {}]", p.min_val, p.max_val))
-                            .unwrap_or_else(|| "-".into());
-                        let s_range = s
-                            .map(|p| format!("[{}, {}]", p.min_val, p.max_val))
-                            .unwrap_or_else(|| "-".into());
+                        // old:
+                        // let r_range = r
+                        //     .map(|p| format!("[{}, {}]", p.min_val, p.max_val))
+                        //     .unwrap_or_else(|| "-".into());
+                        // let s_range = s
+                        //     .map(|p| format!("[{}, {}]", p.min_val, p.max_val))
+                        //     .unwrap_or_else(|| "-".into());
+                        let r_range = "-";
+                        let s_range = "-";
 
+                        // old:
+                        // let dig_bits = info.dig_status.as_ref().map(|d| d.primary_units.len()).unwrap_or(0);
+                        // let ext_bits = info.dig_status.as_ref().map(|d| d.common_units.len()).unwrap_or(0);
                         let dig_bits = info.dig_status.as_ref().map(|d| d.bits.len()).unwrap_or(0);
-                        let ext_bits = info
-                            .dig_status
-                            .as_ref()
-                            .map(|d| d.ext_bits.len())
-                            .unwrap_or(0);
+                        let ext_bits = 0;
+
                         let cmds = info.dig_control.as_ref().map(|c| c.cmds.len()).unwrap_or(0);
 
                         println!("• {}", entry.name);
@@ -87,12 +94,16 @@ async fn main() -> Result<()> {
         let dpm_endpoint =
             std::env::var("DPM_ADDR").unwrap_or_else(|_| "http://adkube-pool40.fnal.gov".into());
         println!("Connecting to live DPM at {}", dpm_endpoint);
-        fetch_dpm_readings(&dpm_endpoint, &devices).await?;
+        //fetch_dpm_readings(&dpm_endpoint, devices.clone()).await?;
+        fetch_dpm_readings(&dpm_endpoint, devices).await?;
     }
 
     #[cfg(all(not(feature = "dpm-live"), feature = "mock"))]
     {
         println!("Using mock DPM data (mocks/dpm.json)");
+        // old block kept for reference, no longer used since load_mock removed:
+
+        /*
         match load_mock("mocks/dpm.json") {
             Ok(readings) => {
                 let units_for = |name: &str| -> &str {
@@ -138,6 +149,30 @@ async fn main() -> Result<()> {
                 }
             }
             Err(e) => eprintln!("Could not load mocks/dpm.json: {e}"),
+        }
+        */
+    }
+    #[cfg(feature = "ioc-live")]
+    {
+        let ioc_endpoint =
+            std::env::var("IOC_ADDR").unwrap_or_else(|_| "http://localhost:6802".to_string());
+
+        println!("Connecting to IOC Alarms service at {}", ioc_endpoint);
+
+        // Example PVs 
+        let pv_names = vec![
+            "linac:area1:ioc-folder2:ioc3:quade-magnet1",
+            "booster:area2:ioc-folder1:ioc1:dipole-magnet1",
+            "booster:area2:ioc-folder1:ioc2:bpm3",
+            "booster:area3:ioc-folder2:ioc1:octo-magnet1",
+            "main-injector:area1:ioc-folder1:ioc2:tmp-sensor3",
+        ];
+
+        for pv in pv_names {
+            match fetch_ioc_alarm(&ioc_endpoint, pv).await {
+                Ok(resp) => println!("• {pv} → {:?}", resp),
+                Err(e) => eprintln!("• {pv} → ERROR: {e}"),
+            }
         }
     }
 
