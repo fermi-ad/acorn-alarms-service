@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .compile(
             &[
-                &format!("{}/controls/service/DevDB/v1/devdb.proto", proto_root),
+                &format!("{}/controls/service/DevDB/v1/DevDB.proto", proto_root),
                 &format!("{}/controls/common/v1/device.proto", proto_root),
                 &format!("{}/controls/common/v1/status.proto", proto_root),
             ],
