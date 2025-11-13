@@ -7,7 +7,7 @@ pub mod devdb {
 }
 
 use devdb::dev_db_client::DevDbClient;
-use devdb::{DeviceList, DeviceInfoReply};
+use devdb::{DeviceInfoReply, DeviceList};
 
 async fn make_channel(endpoint: &str) -> Result<Channel> {
     let mut ep = Endpoint::from_shared(endpoint.to_string())?;

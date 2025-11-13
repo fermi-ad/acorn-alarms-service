@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
 
         println!("Connecting to IOC Alarms service at {}", ioc_endpoint);
 
-        // Example PVs 
+        // Example PVs
         let pv_names = vec![
             "linac:area1:ioc-folder2:ioc3:quade-magnet1",
             "booster:area2:ioc-folder1:ioc1:dipole-magnet1",
@@ -175,7 +175,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
 
     Ok(())
 }
