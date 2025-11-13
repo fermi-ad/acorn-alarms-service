@@ -12,5 +12,4 @@ anyhow = "1.0"
 
 [build-dependencies]
 tonic-build = { version = "0.11", features = ["prost"] }
-protoc-bin-vendored = "3"
-
+protoc-bin-vendored = "3.2"

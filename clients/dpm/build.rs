@@ -1,4 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let protoc_path = protoc_bin_vendored::protoc_bin_path()?;
+    unsafe { std::env::set_var("PROTOC", protoc_path) };
+
     let proto_dir = "../../interface-definitions";
     let virtual_proto_dir = "../../interface-definitions/proto"; // where your protos actually are
 

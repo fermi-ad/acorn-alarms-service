@@ -11,6 +11,7 @@ dependencies = [
  "dpm-client",
  "ioc-alarms-client",
  "prost",
+ "protoc-bin-vendored",
  "serde",
  "serde_json",
  "tokio",

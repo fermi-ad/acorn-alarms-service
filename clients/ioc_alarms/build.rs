@@ -1,4 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let protoc_path = protoc_bin_vendored::protoc_bin_path()?;
+    unsafe { std::env::set_var("PROTOC", protoc_path) };
+
     const IOC_ALARMS_PROTO: &str =
         "../../interface-definitions/proto/controls/service/grpc-ioc-alarms/v1/ioc_alarms.proto";
 

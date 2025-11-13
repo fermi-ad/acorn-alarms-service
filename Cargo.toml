@@ -25,3 +25,6 @@ default = ["mock"]
 mock = ["dpm-client"]
 dpm-live = ["dpm-client"]
 ioc-live = ["ioc-alarms-client"]
+
+[build-dependencies]
+protoc-bin-vendored = "3.2"

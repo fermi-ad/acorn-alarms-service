@@ -1,17 +1,21 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const DEVDB_PROTO: &str =
-        "../../interface-definitions/proto/controls/service/DevDB/v1/devdb.proto";
+    let protoc_path = protoc_bin_vendored::protoc_bin_path()?;
+    unsafe { std::env::set_var("PROTOC", protoc_path) };
 
-    println!("cargo:rerun-if-changed={DEVDB_PROTO}");
-    println!("cargo:rerun-if-changed=../../interface-definitions/proto");
+    let proto_root = "../../interface-definitions/proto";
 
-    tonic_build::configure().build_server(false).compile(
-        &[DEVDB_PROTO],
-        &[
-            "../../interface-definitions/proto/controls",
-            "../../interface-definitions/proto/controls/service/DevDB/v1",
-        ],
-    )?;
+    tonic_build::configure()
+        .build_server(false)
+        .build_client(true)
+        .compile(
+            &[
+                &format!("{}/controls/service/DevDB/v1/devdb.proto", proto_root),
+                &format!("{}/controls/common/v1/device.proto", proto_root),
+                &format!("{}/controls/common/v1/status.proto", proto_root),
+            ],
+            &[proto_root],
+        )?;
 
+    println!("cargo:rerun-if-changed={}", proto_root);
     Ok(())
 }
