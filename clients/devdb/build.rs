@@ -1,8 +1,9 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let protoc_path = protoc_bin_vendored::protoc_bin_path()?;
-    unsafe { std::env::set_var("PROTOC", protoc_path) };
+use build_support::setup_protoc_env;
 
-    let proto_root = "../../interface-definitions/proto";
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    setup_protoc_env()?; // using shared helper
+
+    let proto_root: &str = "../../interface-definitions/proto";
 
     tonic_build::configure()
         .build_server(false)
