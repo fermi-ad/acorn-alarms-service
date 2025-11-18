@@ -1,4 +1,42 @@
+mod devdb;
+mod dpm;
+mod ioc_alarms;
+
 use anyhow::Result;
+//use crate::{devdb, dpm, ioc_alarms};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    println!("Acorn Alarms Service starting…");
+
+    // --- DevDB test ---
+    let devdb_endpoint = "http://localhost:6802";
+    let devices = vec!["M:OUTTMP".to_string()];
+    match devdb::fetch_device_info(devdb_endpoint, devices).await {
+        Ok(info) => println!("DevDB OK: {:?}", info),
+        Err(e) => println!("DevDB error: {e:?}"),
+    }
+
+    // --- DPM (DAQ) test ---
+    let dpm_endpoint = "http://localhost:50051";
+    let drf_list = vec!["G:AMANDA@1".to_string()];
+    match dpm::fetch_readings(dpm_endpoint, drf_list).await {
+        Ok(readings) => println!("DAQ OK: {:?}", readings),
+        Err(e) => println!("DAQ error: {e:?}"),
+    }
+
+    // --- IOC Alarms test ---
+    let ioc_endpoint = "http://localhost:51000";
+    match ioc_alarms::fetch_ioc_alarm(ioc_endpoint, "myPV".into()).await {
+        Ok(resp) => println!("IOC OK: {:?}", resp),
+        Err(e) => println!("IOC error: {e:?}"),
+    }
+
+    Ok(())
+}
+
+
+/*use anyhow::Result;
 use std::env;
 use tokio;
 
@@ -18,7 +56,7 @@ use serde_json;
 // IOC Alarms client
 
 #[cfg(feature = "ioc-live")]
-use ioc_alarms_client::fetch_ioc_alarm;
+use ioc_alarms::fetch_ioc_alarm;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -95,7 +133,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// old block kept for reference, no longer used since load_mock removed:
+// old block kept for reference, no longer used since load_mock removed: */
 
 /*
 match load_mock("mocks/dpm.json") {
