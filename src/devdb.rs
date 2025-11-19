@@ -1,26 +1,15 @@
-use anyhow::Result;
-use tonic::transport::Channel;
+use crate::proto::services::devdb::*;
+use crate::proto::services::devdb::dev_db_client::DevDbClient;
+
 use tonic::Request;
+use anyhow::Result;
 
-pub mod services {
-    pub mod devdb {
-        tonic::include_proto!("services.devdb");
-    }
-}
-
-use services::devdb::dev_db_client::DevDbClient;
-use services::devdb::{DeviceInfoReply, DeviceList};
-
-pub async fn fetch_device_info(endpoint: &str, devices: Vec<String>) -> Result<DeviceInfoReply> {
-    let channel = Channel::from_shared(endpoint.to_string())?
-        .connect()
-        .await?;
-
-    let mut client = DevDbClient::new(channel);
-
-    let req = Request::new(DeviceList { device: devices });
-
+pub async fn fetch_device_info(
+    endpoint: &str,
+    names: Vec<String>
+) -> Result<DeviceInfoReply> {
+    let mut client = DevDbClient::connect(endpoint.to_string()).await?;
+    let req = Request::new(DeviceList { device: names });
     let resp = client.get_device_info(req).await?.into_inner();
-
     Ok(resp)
 }

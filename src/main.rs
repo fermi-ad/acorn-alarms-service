@@ -1,8 +1,10 @@
 mod devdb;
 mod dpm;
 mod ioc_alarms;
+mod proto;
 
 use anyhow::Result;
+use tonic::transport::Channel;
 //use crate::{devdb, dpm, ioc_alarms};
 
 #[tokio::main]

@@ -1,22 +1,10 @@
 use anyhow::Result;
-use tonic::transport::Channel;
-use tonic::Request;
-
-pub mod services {
-    pub mod ioc_alarms {
-        tonic::include_proto!("services.ioc_alarms");
-    }
-}
-
-use services::ioc_alarms::ioc_alarms_client::IocAlarmsClient;
-use services::ioc_alarms::{IocAlarmsRequest, IocAlarmsResponse};
+use tonic::{Request, transport::Channel};
+use crate::proto::services::ioc_alarms::*;
+use crate::proto::services::ioc_alarms::ioc_alarms_client::IocAlarmsClient;
 
 pub async fn fetch_ioc_alarm(endpoint: &str, pv_name: String) -> Result<IocAlarmsResponse> {
-    let channel = Channel::from_shared(endpoint.to_string())?
-        .connect()
-        .await?;
-
-    let mut client = IocAlarmsClient::new(channel);
+    let mut client = IocAlarmsClient::connect(endpoint.to_string()).await?;
 
     let req = Request::new(IocAlarmsRequest { pv_name });
 

@@ -1,32 +1,19 @@
 use anyhow::Result;
-use tonic::transport::Channel;
-use tonic::{Request, Streaming};
+use tonic::{Request, transport::Channel};
+use crate::proto::services::daq::*;
+use crate::proto::services::daq::daq_client::DaqClient;
 
-pub mod services {
-    pub mod daq {
-        tonic::include_proto!("services.daq");
-    }
-}
+pub async fn fetch_readings(endpoint: &str, drf_list: Vec<String>) -> Result<Vec<ReadingReply>> {
+    let mut client = DaqClient::connect(endpoint.to_string()).await?;
 
-use services::daq::daq_client::DaqClient;
-use services::daq::{ReadingList, ReadingReply};
+    let req = Request::new(ReadingList { drf: drf_list });
 
-pub async fn fetch_readings(endpoint: &str, drfs: Vec<String>) -> Result<Vec<ReadingReply>> {
-    let channel = Channel::from_shared(endpoint.to_string())?
-        .connect()
-        .await?;
-
-    let mut client = DaqClient::new(channel);
-
-    let req = Request::new(ReadingList { drf: drfs });
-
-    let mut stream: Streaming<ReadingReply> = client.read(req).await?.into_inner();
+    let mut stream = client.read(req).await?.into_inner();
 
     let mut out = Vec::new();
-    while let Some(msg) = stream.message().await? {
-        out.push(msg);
+    while let Some(item) = stream.message().await? {
+        out.push(item);
     }
 
     Ok(out)
 }
-
