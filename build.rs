@@ -2,6 +2,9 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    let protoc_path = protoc_bin_vendored::protoc_bin_path().expect("no protoc");
+    unsafe { env::set_var("PROTOC", protoc_path) };
+
     let proto_root = "interface-definitions/proto";
 
     let devdb = format!("{proto_root}/controls/service/DevDB/v1/DevDB.proto");
