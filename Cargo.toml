@@ -1,6 +1,17 @@
 [package]
 name = "acorn-alarms-service"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread","macros"] }
+tonic = "0.11"
+prost = "0.12"
+prost-types = "0.12"
+
+[build-dependencies]
+tonic-build = "0.11"
+prost-build = "0.12"
+anyhow = "1"
+protoc-bin-vendored = "3.2"
