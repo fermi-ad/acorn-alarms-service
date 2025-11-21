@@ -8,7 +8,7 @@ use tonic::transport::Channel;
 //use crate::{devdb, dpm, ioc_alarms};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     println!("Acorn Alarms Service starting…");
 
     // --- DevDB test ---
