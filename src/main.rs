@@ -1,9 +1,8 @@
 mod devdb_client;
 mod proto;
-
 use anyhow::Result;
 use devdb_client::client::DevDBClient;
-
+use dpm::{DaqError, DpmData};
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("Acorn Alarms Service starting…");
@@ -26,8 +25,22 @@ async fn main() -> Result<()> {
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = "http://[::1]:50051/";
-    let drf_list = vec!["G:AMANDA".to_string(), "M:OUTTMP".to_string()];
-    dpm::fetch_readings(dpm_endpoint, drf_list).await?;
+    let drf_list = vec![
+        "G:AMANDA".to_string(),
+        "G|AMANDA".to_string(),
+        "M:OUTTMP".to_string(),
+    ];
+    match dpm::fetch_readings(dpm_endpoint, drf_list).await {
+        Ok(reading) => println!("DPM Reading: {:?}", reading),
+        Err(e) => println!("DPM ERROR: {:?}", e),
+    };
+
+    // --- IOC Alarms test ---
+    let ioc_endpoint = "http://10.200.24.128:6802";
+    match ioc_alarms::fetch_ioc_alarm(ioc_endpoint, "myPV".into()).await {
+        Ok(resp) => println!("IOC OK: {:?}", resp),
+        Err(e) => println!("IOC error: {e:?}"),
+    }
 
     Ok(())
 }
