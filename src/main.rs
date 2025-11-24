@@ -24,5 +24,10 @@ async fn main() -> Result<()> {
         Err(e) => println!("DevDB alarm error: {e:?}"),
     }
 
+    // --- DPM (DAQ) test ---
+    let dpm_endpoint = "http://[::1]:50051/";
+    let drf_list = vec!["G:AMANDA".to_string(), "M:OUTTMP".to_string()];
+    dpm::fetch_readings(dpm_endpoint, drf_list).await?;
+
     Ok(())
 }
