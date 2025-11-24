@@ -1,11 +1,12 @@
-// src/devdb_client/model.rs
-
 use crate::proto::services::devdb::{
-    info_entry, AlarmInfo, DeviceAnalogAlarm, DeviceDigitalAlarm, DeviceInfo,
+    AlarmInfo, DeviceAnalogAlarm, DeviceDigitalAlarm, InfoEntry,
 };
 
-/// DeviceSummary
+use crate::proto::services::devdb::info_entry;
 
+/// ------------------------------------------------------------
+/// DeviceSummary – summary of getDeviceInfo results
+/// ------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct DeviceSummary {
     pub name: String,
@@ -17,7 +18,8 @@ pub struct DeviceSummary {
 }
 
 impl DeviceSummary {
-    pub fn from_proto(entry: &crate::proto::services::devdb::InfoEntry) -> Option<Self> {
+    /// Convert a single InfoEntry → DeviceSummary (if valid)
+    pub fn from_proto(entry: &InfoEntry) -> Option<Self> {
         let name = entry.name.clone();
 
         match &entry.result {
@@ -34,25 +36,40 @@ impl DeviceSummary {
     }
 }
 
-/// AlarmInfoExpanded
-
+/// ------------------------------------------------------------
+/// AlarmInfoExpanded – structured result for getAllAlarmInfo
+/// ------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct AlarmInfoExpanded {
     pub device_index: i32,
     pub property_index: u32,
+    pub status_word_hex: Option<String>,
     pub tries_needed: u32,
     pub tries_now: u32,
-    pub analog: DeviceAnalogAlarm,
-    pub digital: DeviceDigitalAlarm,
+
+    pub analog: Option<DeviceAnalogAlarm>,
+    pub digital: Option<DeviceDigitalAlarm>,
 }
 
 impl AlarmInfoExpanded {
     pub fn from_proto(info: &AlarmInfo) -> Self {
+        let blk = info.alarm_block.as_ref();
+
+        // Convert `bytes` → hex string (safe)
+        let status_hex = blk.map(|b| {
+            b.status
+                .iter()
+                .map(|byte| format!("{:02X}", byte))
+                .collect::<String>()
+        });
+
         Self {
-            device_index: info.alarm_block.di,
-            property_index: info.alarm_block.pi,
-            tries_needed: info.alarm_block.tries_needed,
-            tries_now: info.alarm_block.tries_now,
+            device_index: blk.map(|b| b.di).unwrap_or_default(),
+            property_index: blk.map(|b| b.pi).unwrap_or_default(),
+            status_word_hex: status_hex,
+            tries_needed: blk.map(|b| b.tries_needed).unwrap_or_default(),
+            tries_now: blk.map(|b| b.tries_now).unwrap_or_default(),
+
             analog: info.device_analog_alarm.clone(),
             digital: info.device_digital_alarm.clone(),
         }
