@@ -1,12 +1,25 @@
-use anyhow::Result;
 use std::error::Error;
+use std::fmt::Display;
 
 use crate::proto::common::device::value;
 use crate::proto::services::daq::daq_client::DaqClient;
 use crate::proto::services::daq::{ReadingList, ReadingReply, reading_reply};
 
 #[derive(Debug)]
-enum DpmData {
+pub struct DaqError {
+    error_text: String,
+}
+
+impl Display for DaqError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        unimplemented!()
+    }
+}
+
+impl Error for DaqError {}
+
+#[derive(Debug)]
+pub enum DpmData {
     DpmReading(DpmReading),
     DpmStatus(DpmStatus),
 }
@@ -25,7 +38,10 @@ struct DpmStatus {
     message: String,
 }
 
-pub async fn fetch_readings(endpoint: &str, drf_list: Vec<String>) -> Result<(), Box<dyn Error>> {
+pub async fn fetch_readings(
+    endpoint: &str,
+    drf_list: Vec<String>,
+) -> Result<DpmData, Box<dyn Error>> {
     let mut client = DaqClient::connect(endpoint.to_string()).await?;
 
     let mut stream = client
@@ -33,39 +49,50 @@ pub async fn fetch_readings(endpoint: &str, drf_list: Vec<String>) -> Result<(),
         .await?
         .into_inner();
 
-    // let mut out = Vec::new();
-    while let reply = stream.message().await? {
+    loop {
+        let reply = stream.message().await?;
         match reply {
             Some(reply) => {
-                println!("Reading: {:?}", parse_reply(&reply))
+                println!("Forever loop!: {:?}", reply);
+                return parse_reply(&reply);
             }
-            None => println!("No Value given"),
+            None => {
+                return Err(Box::new(DaqError {
+                    error_text: "Something happened!".to_string(),
+                }));
+            }
         }
     }
-
-    Ok(())
 }
 
-fn parse_reply(reply: &ReadingReply) -> Option<DpmData> {
+fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn Error>> {
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
             let reading = &readings.reading;
             let rdg = &reading[0];
-            Some(DpmData::DpmReading(DpmReading {
+            Ok(DpmData::DpmReading(DpmReading {
                 index: reply_index,
                 timestamp: rdg
                     .timestamp
-                    .map(|v| v.seconds as f64 + v.nanos as f64 / 1_000_000_000.0)?,
-                data: rdg.data.as_ref().map(|v| v.value.clone()).flatten()?,
+                    .map(|v| v.seconds as f64 + v.nanos as f64 / 1_000_000_000.0)
+                    .unwrap(),
+                data: rdg
+                    .data
+                    .as_ref()
+                    .map(|v| v.value.clone())
+                    .flatten()
+                    .unwrap(),
             }))
         }
-        Some(reading_reply::Value::Status(status)) => Some(DpmData::DpmStatus(DpmStatus {
+        Some(reading_reply::Value::Status(status)) => Ok(DpmData::DpmStatus(DpmStatus {
             index: reply_index,
             facility_code: status.facility_code,
             status_code: status.status_code,
             message: status.message.clone(),
         })),
-        None => None,
+        None => Err(Box::new(DaqError {
+            error_text: "Something happened!".to_string(),
+        })),
     }
 }
