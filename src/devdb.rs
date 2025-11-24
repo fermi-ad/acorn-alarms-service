@@ -1,8 +1,8 @@
-use crate::proto::services::devdb::dev_db_client::DevDbClient;
-use crate::proto::services::devdb::*;
-
 use anyhow::Result;
 use tonic::Request;
+
+use crate::proto::services::devdb::dev_db_client::DevDbClient;
+use crate::proto::services::devdb::*;
 
 pub async fn fetch_device_info(endpoint: &str, names: Vec<String>) -> Result<DeviceInfoReply> {
     let mut client = DevDbClient::connect(endpoint.to_string()).await?;

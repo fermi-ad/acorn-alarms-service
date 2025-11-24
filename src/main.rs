@@ -1,21 +1,24 @@
 mod devdb;
+pub mod devdb_client;
 mod dpm;
 mod ioc_alarms;
 mod proto;
+//use devdb_client::client::DevDBClient;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("Acorn Alarms Service starting…");
 
     // --- DevDB test ---
-    let devdb_endpoint = "http://10.200.24.105:6802";
+    let endpoint = "http://10.200.24.105:6802";
     let devices = vec!["M:OUTTMP".to_string()];
-    match devdb::fetch_device_info(devdb_endpoint, devices).await {
+
+    match devdb::fetch_device_info(endpoint, devices).await {
         Ok(info) => println!("DevDB OK: {:?}", info),
         Err(e) => println!("DevDB error: {e:?}"),
     }
 
-    // --- DPM (DAQ) test ---
+    // --- DPM test ---
     let dpm_endpoint = "http://dce07.fnal.gov:50051/";
     let drf_list = vec!["G:AMANDA@1".to_string()];
     match dpm::fetch_readings(dpm_endpoint, drf_list).await {
