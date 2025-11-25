@@ -3,6 +3,8 @@ mod proto;
 use anyhow::Result;
 use devdb_client::client::DevDBClient;
 use dpm::{DaqError, DpmData};
+use tokio_stream::StreamExt;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("Acorn Alarms Service starting…");
@@ -31,7 +33,14 @@ async fn main() -> Result<()> {
         "M:OUTTMP".to_string(),
     ];
     match dpm::fetch_readings(dpm_endpoint, drf_list).await {
-        Ok(reading) => println!("DPM Reading: {:?}", reading),
+        Ok(mut stream) => {
+            while let Some(data) = stream.next().await {
+                match data {
+                    Ok(reading) => println!("DPM Reading: {:?}", dpm::parse_reply(&reading)),
+                    Err(e) => println!("DPM stream error: {:?}", e),
+                }
+            }
+        }
         Err(e) => println!("DPM ERROR: {:?}", e),
     };
 
