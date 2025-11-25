@@ -1,5 +1,5 @@
-use std::error::Error;
-use std::fmt::Display;
+use futures::Stream;
+use tonic::Status;
 
 use crate::proto::common::device::value;
 use crate::proto::services::daq::daq_client::DaqClient;
@@ -10,13 +10,13 @@ pub struct DaqError {
     error_text: String,
 }
 
-impl Display for DaqError {
+impl std::fmt::Display for DaqError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unimplemented!()
+        write!(f, "DaqError: {}", self.error_text)
     }
 }
 
-impl Error for DaqError {}
+impl std::error::Error for DaqError {}
 
 #[derive(Debug)]
 pub enum DpmData {
@@ -41,31 +41,21 @@ struct DpmStatus {
 pub async fn fetch_readings(
     endpoint: &str,
     drf_list: Vec<String>,
-) -> Result<DpmData, Box<dyn Error>> {
+) -> Result<
+    impl Stream<Item = Result<ReadingReply, Status>>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let mut client = DaqClient::connect(endpoint.to_string()).await?;
-
-    let mut stream = client
+    let stream = client
         .read(ReadingList { drf: drf_list })
         .await?
         .into_inner();
-
-    loop {
-        let reply = stream.message().await?;
-        match reply {
-            Some(reply) => {
-                println!("Forever loop!: {:?}", reply);
-                return parse_reply(&reply);
-            }
-            None => {
-                return Err(Box::new(DaqError {
-                    error_text: "Something happened!".to_string(),
-                }));
-            }
-        }
-    }
+    Ok(stream)
 }
 
-fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn Error>> {
+pub fn parse_reply(
+    reply: &ReadingReply,
+) -> Result<DpmData, Box<dyn std::error::Error + Send + Sync>> {
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
@@ -92,7 +82,7 @@ fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn Error>> {
             message: status.message.clone(),
         })),
         None => Err(Box::new(DaqError {
-            error_text: "Something happened!".to_string(),
+            error_text: "Empty reply value".to_string(),
         })),
     }
 }
