@@ -53,26 +53,24 @@ pub async fn fetch_readings(
     Ok(stream)
 }
 
-pub fn parse_reply(
-    reply: &ReadingReply,
-) -> Result<DpmData, Box<dyn std::error::Error + Send + Sync>> {
+pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::Error>> {
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
             let reading = &readings.reading;
             let rdg = &reading[0];
+            let ts = rdg
+                .timestamp
+                .as_ref()
+                .ok_or_else(|| "missing timestamp".to_string())?;
             Ok(DpmData::DpmReading(DpmReading {
                 index: reply_index,
-                timestamp: rdg
-                    .timestamp
-                    .map(|v| v.seconds as f64 + v.nanos as f64 / 1_000_000_000.0)
-                    .unwrap(),
+                timestamp: ts.seconds as f64 + ts.nanos as f64 / 1_000_000_000.0,
                 data: rdg
                     .data
                     .as_ref()
-                    .map(|v| v.value.clone())
-                    .flatten()
-                    .unwrap(),
+                    .and_then(|v| v.value.clone())
+                    .ok_or_else(|| "missing data value".to_string())?,
             }))
         }
         Some(reading_reply::Value::Status(status)) => Ok(DpmData::DpmStatus(DpmStatus {
@@ -84,5 +82,15 @@ pub fn parse_reply(
         None => Err(Box::new(DaqError {
             error_text: "Empty reply value".to_string(),
         })),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn empty_reading_reply() {
+        unimplemented!();
     }
 }
