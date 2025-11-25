@@ -1,6 +1,6 @@
 mod devdb_client;
 mod dpm;
-mod ioc_alarms;
+//mod ioc_alarms;
 mod proto;
 
 use anyhow::Result;
