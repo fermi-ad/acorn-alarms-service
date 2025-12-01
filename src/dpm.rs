@@ -24,18 +24,18 @@ pub enum DpmData {
     DpmStatus(DpmStatus),
 }
 #[derive(Debug)]
-struct DpmReading {
-    index: u32,
-    timestamp: f64,
-    data: value::Value,
+pub struct DpmReading {
+    pub index: u32,
+    pub timestamp: f64,
+    pub data: value::Value,
 }
 
 #[derive(Debug)]
-struct DpmStatus {
-    index: u32,
-    facility_code: i32,
-    status_code: i32,
-    message: String,
+pub struct DpmStatus {
+    pub index: u32,
+    pub facility_code: i32,
+    pub status_code: i32,
+    pub message: String,
 }
 
 pub async fn fetch_readings(
@@ -87,10 +87,29 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
 
 #[cfg(test)]
 mod test {
+    use crate::proto::common::status::Status;
+
     use super::*;
 
     #[test]
-    fn empty_reading_reply() {
-        unimplemented!();
+    fn status_reading_reply() {
+        let status_reply = ReadingReply {
+            index: 0,
+            value: Some(reading_reply::Value::Status(Status {
+                facility_code: 1,
+                status_code: 2,
+                message: "DPM PEND".to_string(),
+            })),
+        };
+        let parsed = parse_reply(&status_reply);
+        match parsed {
+            Ok(DpmData::DpmStatus(status)) => {
+                assert_eq!(status.index, 0, "Incorrect index");
+                assert_eq!(status.facility_code, 1, "Incorrect facility code");
+                assert_eq!(status.status_code, 2, "Incorrect status code");
+                assert_eq!(status.message, "DPM PEND".to_string(), "Incorrect message");
+            }
+            _ => panic!("Expected parsed data to be Status"),
+        }
     }
 }
