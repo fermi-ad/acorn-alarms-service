@@ -3,8 +3,27 @@ mod dpm;
 mod ioc_alarms;
 mod proto;
 
-use dpm::{DaqError, DpmData};
 use tokio_stream::StreamExt;
+
+use crate::dpm::DpmData;
+
+fn handle_daq_data(data: DpmData) {
+    match data {
+        DpmData::DpmReading(reading) => {
+            println!("Reading!");
+            println!("index: {:?}", reading.index);
+            println!("timestamp: {:?}", reading.timestamp);
+            println!("reading: {:?}", reading.data);
+        }
+        DpmData::DpmStatus(status) => {
+            println!("Status!");
+            println!("Index: {:?}", status.index);
+            println!("Facility Code: {:?}", status.facility_code);
+            println!("Status Code: {:?}", status.status_code);
+            println!("Message: {:?}", status.message);
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,13 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let drf_list = vec![
         "G:AMANDA".to_string(),
         "G|AMANDA".to_string(),
-        "M:OUTTMP".to_string(),
+        "M:OUTTMP@1h".to_string(),
     ];
     match dpm::fetch_readings(dpm_endpoint, drf_list).await {
         Ok(mut stream) => {
             while let Some(data) = stream.next().await {
                 match data {
-                    Ok(reading) => println!("DPM Reading: {:?}", dpm::parse_reply(&reading)),
+                    Ok(reading) => {
+                        println!("DATA: {:?}", reading);
+                        handle_daq_data(dpm::parse_reply(&reading)?);
+                    }
                     Err(e) => println!("DPM stream error: {:?}", e),
                 }
             }
