@@ -1,26 +1,21 @@
-use anyhow::Result;
-use tonic::Request;
-
 use crate::proto::services::devdb::{
     dev_db_client::DevDbClient, AlarmInfoReply, DeviceInfoReply, DeviceList,
 };
+use anyhow::Result;
+use tonic::Request;
 
 use super::model::{AlarmInfoExpanded, DeviceSummary};
 
 pub struct DevDBClient {
     inner: DevDbClient<tonic::transport::Channel>,
 }
-
 impl DevDBClient {
     /// Connect to DevDB gRPC endpoint
-
     pub async fn connect(endpoint: &str) -> Result<Self> {
         let inner = DevDbClient::connect(endpoint.to_string()).await?;
         Ok(Self { inner })
     }
-
     // FETCH BASIC DEVICE INFO
-
     pub async fn get_device_info(&mut self, names: Vec<String>) -> Result<Vec<DeviceSummary>> {
         let req = Request::new(DeviceList { device: names });
 
@@ -34,9 +29,7 @@ impl DevDBClient {
 
         Ok(summaries)
     }
-
     // FETCH ALARM INFO
-
     pub async fn get_all_alarm_info(
         &mut self,
         names: Vec<String>,

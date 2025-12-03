@@ -1,12 +1,9 @@
-use crate::proto::services::devdb::{
-    AlarmInfo, DeviceAnalogAlarm, DeviceDigitalAlarm, InfoEntry,
-};
+use crate::proto::services::devdb::{AlarmInfo, DeviceAnalogAlarm, DeviceDigitalAlarm, InfoEntry};
 
 use crate::proto::services::devdb::info_entry;
 
-/// ------------------------------------------------------------
 /// DeviceSummary – summary of getDeviceInfo results
-/// ------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct DeviceSummary {
     pub name: String,
@@ -18,7 +15,6 @@ pub struct DeviceSummary {
 }
 
 impl DeviceSummary {
-    /// Convert a single InfoEntry → DeviceSummary (if valid)
     pub fn from_proto(entry: &InfoEntry) -> Option<Self> {
         let name = entry.name.clone();
 
@@ -55,7 +51,6 @@ impl AlarmInfoExpanded {
     pub fn from_proto(info: &AlarmInfo) -> Self {
         let blk = info.alarm_block.as_ref();
 
-        // Convert `bytes` → hex string (safe)
         let status_hex = blk.map(|b| {
             b.status
                 .iter()

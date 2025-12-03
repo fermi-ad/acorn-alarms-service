@@ -1,4 +1,9 @@
 #[allow(clippy::enum_variant_names)]
+#[allow(dead_code)]
+#[allow(unused_imports)]
+#[allow(clippy::large_enum_variant)]
+
+//include!(concat!(env!("OUT_DIR"), "/services.devdb.rs"));
 pub mod common {
     pub mod device {
         include!(concat!(env!("OUT_DIR"), "/common.device.rs"));
@@ -8,7 +13,6 @@ pub mod common {
     }
 }
 
-#[allow(clippy::enum_variant_names)]
 pub mod services {
     pub mod daq {
         include!(concat!(env!("OUT_DIR"), "/services.daq.rs"));

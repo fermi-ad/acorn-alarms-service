@@ -2,7 +2,8 @@ use crate::proto::services::daq::daq_client::DaqClient;
 use crate::proto::services::daq::*;
 use anyhow::Result;
 use tonic::Request;
-
+#[allow(dead_code)]
+#[allow(unused_imports)]
 pub async fn fetch_readings(endpoint: &str, drf_list: Vec<String>) -> Result<Vec<ReadingReply>> {
     let mut client = DaqClient::connect(endpoint.to_string()).await?;
 

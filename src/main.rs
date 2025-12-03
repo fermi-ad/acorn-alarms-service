@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+#[allow(unused_imports)]
 mod devdb_client;
 mod dpm;
 pub mod ioc_alarms_client;
@@ -16,6 +18,7 @@ async fn main() -> Result<()> {
 
     // --- Test Device Info ---
     let names = vec![];
+    //let names = vec!["R:MCRT70".to_string()];
 
     match client.get_device_info(names.clone()).await {
         Ok(summary) => println!("DEVICE INFO = {:#?}", summary),

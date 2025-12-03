@@ -15,8 +15,6 @@ impl IOCAlarmsClient {
         Ok(Self { inner })
     }
 
-    /// Fetch IOC alarm for a PV.
-    /// Returns `Ok(None)` if no alarm_info is present.
     pub async fn fetch_alarm(&mut self, pv_name: String) -> Result<Option<IocAlarm>> {
         let req = Request::new(IocAlarmsRequest {
             pv_name_list: vec![pv_name],
