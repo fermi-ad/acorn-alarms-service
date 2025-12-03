@@ -57,16 +57,15 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
-            let reading = &readings.reading;
-            let rdg = &reading[0];
-            let ts = rdg
+            let reading = readings.reading.first().ok_or("No readings in reply")?;
+            let timestamp = reading
                 .timestamp
                 .as_ref()
                 .ok_or_else(|| "missing timestamp".to_string())?;
             Ok(DpmData::DpmReading(DpmReading {
                 index: reply_index,
-                timestamp: ts.seconds as f64 + ts.nanos as f64 / 1_000_000_000.0,
-                data: rdg
+                timestamp: timestamp.seconds as f64 + timestamp.nanos as f64 / 1_000_000_000.0,
+                data: reading
                     .data
                     .as_ref()
                     .and_then(|v| v.value.clone())

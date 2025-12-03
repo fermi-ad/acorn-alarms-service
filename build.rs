@@ -9,7 +9,8 @@ fn main() {
 
     let devdb = "interface-definitions/proto/controls/service/DevDB/v1/DevDB.proto";
     let daq = "interface-definitions/proto/controls/service/DAQ/v1/DAQ.proto";
-    let ioc = "interface-definitions/proto/controls/service/grpc-ioc-alarms/v1/ioc_alarms.proto";
+    let ioc_alarms =
+        "interface-definitions/proto/controls/service/grpc-ioc-alarms/v1/ioc_alarms.proto";
 
     tonic_prost_build::configure()
         .build_server(false)
@@ -32,6 +33,6 @@ fn main() {
         .type_attribute("Severity", "#[allow(clippy::enum_variant_names)]")
         // DeviceAlarmText is never constructed → allow dead code
         .type_attribute(".services.devdb.DeviceAlarmText", "#[allow(dead_code)]")
-        .compile_protos(&[devdb, daq, ioc], &["interface-definitions/"])
+        .compile_protos(&[devdb, daq, ioc_alarms], &["interface-definitions/"])
         .unwrap();
 }
