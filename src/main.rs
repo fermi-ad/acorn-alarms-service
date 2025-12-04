@@ -11,7 +11,7 @@ use ioc_alarms_client::client::IOCAlarmsClient;
 async fn main() -> Result<()> {
     println!("Acorn Alarms Service starting…");
 
-    // NOTE: still hard-coded for now (as before)
+    // still hard-coded for now (as before)
     let endpoint = "http://10.200.24.105:6802";
     let mut client = DevDBClient::connect(endpoint).await?;
 
