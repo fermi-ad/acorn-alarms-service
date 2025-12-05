@@ -57,7 +57,6 @@ async fn main() -> Result<()> {
             while let Some(data) = stream.next().await {
                 match data {
                     Ok(reading) => {
-                        println!("DATA: {:?}", reading);
                         handle_daq_data(dpm::parse_reply(&reading)?);
                     }
                     Err(e) => println!("DPM stream error: {:?}", e),

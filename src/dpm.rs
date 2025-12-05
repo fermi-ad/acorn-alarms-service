@@ -1,3 +1,4 @@
+use chrono::{DateTime, TimeZone, Utc};
 use futures::Stream;
 use tonic::Status;
 
@@ -26,7 +27,7 @@ pub enum DpmData {
 #[derive(Debug)]
 pub struct DpmReading {
     pub index: u32,
-    pub timestamp: f64,
+    pub timestamp: DateTime<Utc>,
     pub data: value::Value,
 }
 
@@ -58,13 +59,18 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
             let reading = readings.reading.first().ok_or("No readings in reply")?;
-            let timestamp = reading
+            let raw_timestamp = reading
                 .timestamp
                 .as_ref()
                 .ok_or_else(|| "missing timestamp".to_string())?;
             Ok(DpmData::DpmReading(DpmReading {
                 index: reply_index,
-                timestamp: timestamp.seconds as f64 + timestamp.nanos as f64 / 1_000_000_000.0,
+                timestamp: Utc
+                    .timestamp_opt(raw_timestamp.seconds, raw_timestamp.nanos as u32)
+                    .single()
+                    .ok_or_else(|| DaqError {
+                        error_text: "Invalid timestamp value".to_string(),
+                    })?,
                 data: reading
                     .data
                     .as_ref()
