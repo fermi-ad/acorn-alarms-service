@@ -9,7 +9,6 @@ pub mod common {
 }
 
 pub mod services {
-    #[allow(clippy::enum_variant_names)]
     pub mod daq {
         include!(concat!(env!("OUT_DIR"), "/services.daq.rs"));
     }
