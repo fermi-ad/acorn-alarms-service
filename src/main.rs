@@ -1,11 +1,11 @@
 mod devdb_client;
+mod dpm;
 mod proto;
+
 use anyhow::Result;
 use devdb_client::client::DevDBClient;
-use dpm::{DaqError, DpmData};
+use dpm::DpmData;
 use tokio_stream::StreamExt;
-
-use crate::dpm::DpmData;
 
 fn handle_daq_data(data: DpmData) {
     match data {
@@ -65,13 +65,6 @@ async fn main() -> Result<()> {
         }
         Err(e) => println!("DPM ERROR: {:?}", e),
     };
-
-    // --- IOC Alarms test ---
-    let ioc_endpoint = "http://10.200.24.128:6802";
-    match ioc_alarms::fetch_ioc_alarm(ioc_endpoint, "myPV".into()).await {
-        Ok(resp) => println!("IOC OK: {:?}", resp),
-        Err(e) => println!("IOC error: {e:?}"),
-    }
 
     Ok(())
 }
