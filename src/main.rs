@@ -26,7 +26,7 @@ fn handle_daq_data(data: DpmData) {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Acorn Alarms Service starting…");
 
     // NOTE: still hard-coded for now (as before)
@@ -48,8 +48,8 @@ async fn main() -> Result<()> {
     // --- DPM (DAQ) test ---
     let dpm_endpoint = "http://[::1]:50051/";
     let drf_list = vec![
-        "G:AMANDA".to_string(),
-        "G|AMANDA".to_string(),
+        "G@AMANDA@Q".to_string(),
+        "G$AMANDA@Q".to_string(),
         "M:OUTTMP@1h".to_string(),
     ];
     match dpm::fetch_readings(dpm_endpoint, drf_list).await {

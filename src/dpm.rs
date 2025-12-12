@@ -19,19 +19,19 @@ impl std::fmt::Display for DaqError {
 
 impl std::error::Error for DaqError {}
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum DpmData {
     DpmReading(DpmReading),
     DpmStatus(DpmStatus),
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct DpmReading {
     pub index: u32,
     pub timestamp: DateTime<Utc>,
     pub data: value::Value,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct DpmStatus {
     pub index: u32,
     pub facility_code: i32,
@@ -92,12 +92,20 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
 
 #[cfg(test)]
 mod test {
-    use crate::proto::common::status::Status;
+
+    use crate::proto::{
+        common::{
+            self,
+            device::{self, value::AnalogAlarm},
+            status::Status,
+        },
+        services::daq::{Reading, Readings},
+    };
 
     use super::*;
 
     #[test]
-    fn status_reading_reply() {
+    fn test_status_reading_reply() {
         let status_reply = ReadingReply {
             index: 0,
             value: Some(reading_reply::Value::Status(Status {
@@ -116,5 +124,63 @@ mod test {
             }
             _ => panic!("Expected parsed data to be Status"),
         }
+    }
+
+    #[test]
+    fn test_analog_alarm_reply_parsed() {
+        let now = Utc::now();
+        let analog_reply = ReadingReply {
+            index: 0,
+            value: Some(reading_reply::Value::Readings(Readings {
+                reading: vec![Reading {
+                    timestamp: Some(prost_types::Timestamp {
+                        seconds: now.timestamp(),
+                        nanos: now.timestamp_subsec_nanos() as i32,
+                    }),
+                    data: Some(device::Value {
+                        value: Some(device::value::Value::AnaAlarm(AnalogAlarm {
+                            minimum: 1.0,
+                            maximum: 5.0,
+                            alarm_enable: true,
+                            alarm_status: false,
+                            abort: false,
+                            abort_inhibit: false,
+                            tries_needed: 10,
+                            tries_now: 2,
+                        })),
+                    }),
+                    status: Some(common::status::Status {
+                        facility_code: 1,
+                        status_code: 1,
+                        message: "Error".to_string(),
+                    }),
+                }],
+            })),
+        };
+
+        let parsed_data = DpmData::DpmReading(DpmReading {
+            index: 0,
+            timestamp: now,
+            data: value::Value::AnaAlarm(AnalogAlarm {
+                minimum: 1.0,
+                maximum: 5.0,
+                alarm_enable: true,
+                alarm_status: false,
+                abort: false,
+                abort_inhibit: false,
+                tries_needed: 10,
+                tries_now: 2,
+            }),
+        });
+
+        assert_eq!(parse_reply(&analog_reply).unwrap(), parsed_data);
+    }
+
+    #[test]
+    fn test_daq_error_fmt_impl() {
+        let err = DaqError {
+            error_text: "This is an error".to_string(),
+        };
+        assert_eq!(format!("{}", err), "DaqError: This is an error");
     }
 }
