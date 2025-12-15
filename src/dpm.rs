@@ -93,16 +93,17 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
 #[cfg(test)]
 mod test {
 
+    use super::*;
     use crate::proto::{
         common::{
-            self,
-            device::{self, value::AnalogAlarm},
+            device::{
+                self,
+                value::{AnalogAlarm, DigitalAlarm},
+            },
             status::Status,
         },
         services::daq::{Reading, Readings},
     };
-
-    use super::*;
 
     #[test]
     fn test_status_reading_reply() {
@@ -149,11 +150,9 @@ mod test {
                             tries_now: 2,
                         })),
                     }),
-                    status: Some(common::status::Status {
-                        facility_code: 1,
-                        status_code: 1,
-                        message: "Error".to_string(),
-                    }),
+                    // this field is deprecated
+                    #[allow(deprecated)]
+                    status: Default::default(),
                 }],
             })),
         };
@@ -174,6 +173,54 @@ mod test {
         });
 
         assert_eq!(parse_reply(&analog_reply).unwrap(), parsed_data);
+    }
+
+    #[test]
+    fn test_digital_alarm_reply_parsed() {
+        let now = Utc::now();
+        let digital_reply = ReadingReply {
+            index: 0,
+            value: Some(reading_reply::Value::Readings(Readings {
+                reading: vec![Reading {
+                    timestamp: Some(prost_types::Timestamp {
+                        seconds: now.timestamp(),
+                        nanos: now.timestamp_subsec_nanos() as i32,
+                    }),
+                    data: Some(device::Value {
+                        value: Some(device::value::Value::DigAlarm(DigitalAlarm {
+                            nominal: 1,
+                            mask: 1,
+                            alarm_enable: true,
+                            alarm_status: true,
+                            abort: false,
+                            abort_inhibit: false,
+                            tries_needed: 10,
+                            tries_now: 11,
+                        })),
+                    }),
+                    // this field is deprecated
+                    #[allow(deprecated)]
+                    status: Default::default(),
+                }],
+            })),
+        };
+
+        let parsed_data = DpmData::DpmReading(DpmReading {
+            index: 0,
+            timestamp: now,
+            data: value::Value::DigAlarm(DigitalAlarm {
+                nominal: 1,
+                mask: 1,
+                alarm_enable: true,
+                alarm_status: true,
+                abort: false,
+                abort_inhibit: false,
+                tries_needed: 10,
+                tries_now: 11,
+            }),
+        });
+
+        assert_eq!(parse_reply(&digital_reply).unwrap(), parsed_data);
     }
 
     #[test]
