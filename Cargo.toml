@@ -12,10 +12,8 @@ prost-types = "0.14.1"
 tokio-stream = { version = "0.1.17", features = ["sync"] }
 tonic-prost = "0.14.2"
 futures = "0.3.31"
-futures-util = { version = "0.3.31", features = ["tokio-io"] }
 chrono = "0.4.42"
 
 [build-dependencies]
-anyhow = "1"
 protoc-bin-vendored = "3.2"
 tonic-prost-build = "0.14.2"
