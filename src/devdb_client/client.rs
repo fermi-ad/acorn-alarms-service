@@ -1,5 +1,5 @@
 use crate::proto::services::devdb::{
-    dev_db_client::DevDbClient, AlarmInfo, AlarmInfoReply, DeviceInfoReply, DeviceList,
+    AlarmInfo, AlarmInfoReply, DeviceInfoReply, DeviceList, dev_db_client::DevDbClient,
 };
 use anyhow::Result;
 use tonic::Request;
