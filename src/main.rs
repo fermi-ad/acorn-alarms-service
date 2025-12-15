@@ -2,7 +2,6 @@ mod devdb_client;
 mod dpm;
 mod proto;
 
-use anyhow::Result;
 use devdb_client::client::DevDBClient;
 use dpm::DpmData;
 use tokio_stream::StreamExt;
