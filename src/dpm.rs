@@ -39,13 +39,40 @@ pub struct DpmStatus {
     pub message: String,
 }
 
-pub async fn fetch_readings(
+pub enum AlarmType {
+    AnalogAlarm,
+    DigitalAlarm,
+}
+
+pub struct AlarmRequest {
+    pub device: String,
+    pub alarm_type: AlarmType,
+}
+
+/// Takes AlarmRequest information and builds out DRF String
+///
+/// # DRF String being used
+/// `DEVICE.{DA|AA}@Q`
+///
+/// - Device: The device name
+/// - DA|AA: The property requested. Digital alarm or Analog
+/// - Q: The event data will be returned. This will be periodic, and only be returned when the alarm block changes
+fn build_drf(request: &AlarmRequest) -> String {
+    let request_properties = match request.alarm_type {
+        AlarmType::AnalogAlarm => ".AA@Q",
+        AlarmType::DigitalAlarm => ".DA@Q",
+    };
+    format!("{}{}", request.device, request_properties)
+}
+
+pub async fn fetch_alarms(
     endpoint: &str,
-    drf_list: Vec<String>,
+    device_list: Vec<AlarmRequest>,
 ) -> Result<
     impl Stream<Item = Result<ReadingReply, Status>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
+    let drf_list = device_list.iter().map(|req| build_drf(req)).collect();
     let mut client = DaqClient::connect(endpoint.to_string()).await?;
     let stream = client
         .read(ReadingList { drf: drf_list })
@@ -59,6 +86,7 @@ pub fn parse_reply(reply: &ReadingReply) -> Result<DpmData, Box<dyn std::error::
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
             let reading = readings.reading.first().ok_or("No readings in reply")?;
+            println!("READINGSSS: {:?}", reading);
             let raw_timestamp = reading
                 .timestamp
                 .as_ref()
@@ -104,6 +132,24 @@ mod test {
         },
         services::daq::{Reading, Readings},
     };
+
+    #[test]
+    fn test_build_analog_drf() {
+        let analog_request = AlarmRequest {
+            device: "G:DEVICE".to_string(),
+            alarm_type: AlarmType::AnalogAlarm,
+        };
+        assert_eq!(build_drf(&analog_request), "G:DEVICE.AA@Q");
+    }
+
+    #[test]
+    fn test_build_digital_drf() {
+        let analog_request = AlarmRequest {
+            device: "G:DEVICE".to_string(),
+            alarm_type: AlarmType::DigitalAlarm,
+        };
+        assert_eq!(build_drf(&analog_request), "G:DEVICE.DA@Q");
+    }
 
     #[test]
     fn test_status_reading_reply() {

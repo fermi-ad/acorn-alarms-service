@@ -2,7 +2,7 @@ mod devdb_client;
 use devdb_client::DevDBClient;
 
 mod dpm;
-use dpm::DpmData;
+use dpm::{AlarmRequest, DpmData};
 
 mod proto;
 use proto::common::device::value::Value;
@@ -83,14 +83,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // --- DPM (DAQ) test ---
+    // TODO: Move this to env variable
     let dpm_endpoint = "http://[::1]:50051/";
     let drf_list = vec![
-        "G@AMANDA@Q".to_string(),
-        "G$AMANDA@Q".to_string(),
-        "M:OUTTMP@1h".to_string(),
+        AlarmRequest {
+            device: "G:AMANDA".to_string(),
+            alarm_type: dpm::AlarmType::AnalogAlarm,
+        },
+        AlarmRequest {
+            device: "G:AMANDA".to_string(),
+            alarm_type: dpm::AlarmType::DigitalAlarm,
+        },
     ];
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
-    match dpm::fetch_readings(dpm_endpoint, drf_list).await {
+    match dpm::fetch_alarms(dpm_endpoint, drf_list).await {
         Ok(mut stream) => {
             while let Some(data) = stream.next().await {
                 match data {
