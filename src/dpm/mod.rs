@@ -102,7 +102,6 @@ pub fn parse_reply(
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
             let reading = readings.reading.first().ok_or("No readings in reply")?;
-            println!("READINGSSS: {:?}", reading);
             let raw_timestamp = reading
                 .timestamp
                 .as_ref()

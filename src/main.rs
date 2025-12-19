@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(dpm_data) => {
                         handle_daq_data(dpm_data, &mut alarms_reporter);
                     }
-                    Err(e) => println!("DPM stream error: {:?}", e),
+                    Err(e) => error!("DPM stream error: {:?}", e),
                 }
             }
         }
