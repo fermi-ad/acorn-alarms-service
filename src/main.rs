@@ -84,8 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- DPM (DAQ) test ---
     // TODO: Move this to env variable
-    let dpm_endpoint = "http://[::1]:50051/";
-    let drf_list = vec![
+    // DPM on dce07 131.225.120.107:50051
+    let dpm_endpoint = "http://131.225.120.107:50051/";
+    let device_list = vec![
         AlarmRequest {
             device: "G:AMANDA".to_string(),
             alarm_type: dpm::AlarmType::AnalogAlarm,
@@ -96,14 +97,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
-    match dpm::fetch_alarms(dpm_endpoint, drf_list).await {
+    match dpm::fetch_alarms(dpm_endpoint, device_list).await {
         Ok(mut stream) => {
             while let Some(data) = stream.next().await {
                 match data {
-                    Ok(reading) => {
-                        handle_daq_data(dpm::parse_reply(&reading)?, &mut alarms_reporter);
+                    Ok(dpm_data) => {
+                        handle_daq_data(dpm_data, &mut alarms_reporter);
                     }
-                    Err(e) => error!("DPM stream error: {:?}", e),
+                    Err(e) => println!("DPM stream error: {:?}", e),
                 }
             }
         }
