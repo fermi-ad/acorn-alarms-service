@@ -73,10 +73,7 @@ pub async fn fetch_alarms(
     impl Stream<Item = Result<DpmData, Box<dyn std::error::Error + Send + Sync>>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    let drf_list = device_list
-        .iter()
-        .map(|req| build_drf(req))
-        .collect::<Vec<_>>();
+    let drf_list = device_list.iter().map(build_drf).collect::<Vec<_>>();
     let mut client = DaqClient::connect(endpoint).await?;
     let stream = client
         .read(ReadingList { drf: drf_list })
