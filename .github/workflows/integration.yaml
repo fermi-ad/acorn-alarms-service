@@ -17,3 +17,4 @@ jobs:
       pull-requests: write
     with:
       pull-git-submodules: true
+      references-internal-git-repo: true
