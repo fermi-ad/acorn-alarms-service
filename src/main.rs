@@ -21,6 +21,8 @@ use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
+const DPM_ADDR: &str = "DPM_ADDR";
+const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
@@ -83,9 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // --- DPM (DAQ) test ---
-    // TODO: Move this to env variable
-    // DPM on dce07 131.225.120.107:50051
-    let dpm_endpoint = "http://131.225.120.107:50051/";
+    let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
     let device_list = vec![
         AlarmRequest {
             device: "G:AMANDA".to_string(),

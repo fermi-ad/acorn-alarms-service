@@ -67,7 +67,7 @@ fn build_drf(request: &AlarmRequest) -> String {
 }
 
 pub async fn fetch_alarms(
-    endpoint: &str,
+    endpoint: String,
     device_list: Vec<AlarmRequest>,
 ) -> Result<
     impl Stream<Item = Result<DpmData, Box<dyn std::error::Error + Send + Sync>>>,
@@ -77,7 +77,7 @@ pub async fn fetch_alarms(
         .iter()
         .map(|req| build_drf(req))
         .collect::<Vec<_>>();
-    let mut client = DaqClient::connect(endpoint.to_string()).await?;
+    let mut client = DaqClient::connect(endpoint).await?;
     let stream = client
         .read(ReadingList { drf: drf_list })
         .await?
