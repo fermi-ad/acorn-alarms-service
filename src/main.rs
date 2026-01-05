@@ -2,7 +2,7 @@ mod devdb_client;
 use devdb_client::DevDBClient;
 
 mod dpm;
-use dpm::DpmData;
+use dpm::{AlarmRequest, DpmData};
 
 mod proto;
 use proto::common::device::value::Value;
@@ -21,6 +21,8 @@ use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
+const DPM_ADDR: &str = "DPM_ADDR";
+const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
@@ -83,19 +85,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // --- DPM (DAQ) test ---
-    let dpm_endpoint = "http://[::1]:50051/";
-    let drf_list = vec![
-        "G@AMANDA@Q".to_string(),
-        "G$AMANDA@Q".to_string(),
-        "M:OUTTMP@1h".to_string(),
+    let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
+    let device_list = vec![
+        AlarmRequest {
+            device: "G:AMANDA".to_string(),
+            alarm_type: dpm::AlarmType::AnalogAlarm,
+        },
+        AlarmRequest {
+            device: "G:AMANDA".to_string(),
+            alarm_type: dpm::AlarmType::DigitalAlarm,
+        },
     ];
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
-    match dpm::fetch_readings(dpm_endpoint, drf_list).await {
+    match dpm::fetch_alarms(dpm_endpoint, device_list).await {
         Ok(mut stream) => {
             while let Some(data) = stream.next().await {
                 match data {
-                    Ok(reading) => {
-                        handle_daq_data(dpm::parse_reply(&reading)?, &mut alarms_reporter);
+                    Ok(dpm_data) => {
+                        handle_daq_data(dpm_data, &mut alarms_reporter);
                     }
                     Err(e) => error!("DPM stream error: {:?}", e),
                 }
