@@ -20,16 +20,16 @@ use rust_env_var_lib::env_var;
 use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
-const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
+const DEFAULT_DEV_DB_ADDR: &str = "http://localhost:6802";
 const DPM_ADDR: &str = "DPM_ADDR";
-const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
+const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
         DpmData::DpmReading(reading) => {
             info!(
-                "Reading!\ndevice: {:?}\ntimestamp: {:?}\nreading: {:?}",
-                reading.device, reading.timestamp, reading.data
+                "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
+                reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
 
             let mut should_report = false;
@@ -50,8 +50,12 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
         }
         DpmData::DpmStatus(status) => {
             error!(
-                "Status!\nDevice: {:?}\nFacility Code: {:?}\nStatus Code: {:?}\nMessage: {:?}",
-                status.device, status.facility_code, status.status_code, status.message
+                "Status!\nDevice: {:?}\nAlarm Type: {:?}\nFacility Code: {:?}\nStatus Code: {:?}\nMessage: {:?}",
+                status.device,
+                status.alarm_type,
+                status.facility_code,
+                status.status_code,
+                status.message
             );
         }
     }
@@ -72,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let names = vec![
         "G:AMANDA".to_string(),
-        "G:OUTTMP".to_string(),
+        "M:OUTTMP".to_string(),
         "B:MH1".to_string(),
         "I:21AIRP".to_string(),
         "I:IP100F".to_string(),
