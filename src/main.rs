@@ -28,7 +28,7 @@ const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
 const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
 
 const DPM_ADDR: &str = "DPM_ADDR";
-const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
+const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
