@@ -348,7 +348,6 @@ mod tests {
         test_reporter.report(0, Utc::now(), true);
         assert!(test_reporter.known_alarms.contains(&0));
     }
-
     #[test]
     fn handles_subset_of_devices_independently() {
         let mut test_reporter = AlarmsReporter {
