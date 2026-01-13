@@ -348,4 +348,29 @@ mod tests {
         test_reporter.report(0, Utc::now(), true);
         assert!(test_reporter.known_alarms.contains(&0));
     }
+    #[test]
+    fn handles_subset_of_devices_independently() {
+        let mut test_reporter = AlarmsReporter {
+            controls_publisher: Some(TestPub::init()),
+            known_alarms: HashSet::new(),
+            pip2_publisher: Some(TestPub::init()),
+        };
+
+        let cur_time = Utc::now();
+
+        // Raise alarms for a subset of non contiguous devices
+        test_reporter.report(2, cur_time, true);
+        test_reporter.report(7, cur_time, true);
+
+        assert!(test_reporter.known_alarms.contains(&2));
+        assert!(test_reporter.known_alarms.contains(&7));
+        assert_eq!(test_reporter.known_alarms.len(), 2);
+
+        // Clear alarm for only one device
+        test_reporter.report(2, cur_time, false);
+
+        assert!(!test_reporter.known_alarms.contains(&2));
+        assert!(test_reporter.known_alarms.contains(&7));
+        assert_eq!(test_reporter.known_alarms.len(), 1);
+    }
 }
