@@ -2,7 +2,7 @@ mod devdb_client;
 use devdb_client::DevDBClient;
 
 mod dpm;
-use dpm::{AlarmRequest, DpmData};
+use dpm::DpmData;
 
 mod proto;
 use proto::common::device::value::Value;
@@ -28,8 +28,8 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
     match data {
         DpmData::DpmReading(reading) => {
             info!(
-                "Reading!\nindex: {:?}\ntimestamp: {:?}\nreading: {:?}",
-                reading.index, reading.timestamp, reading.data
+                "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
+                reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
 
             let mut should_report = false;
@@ -50,8 +50,12 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
         }
         DpmData::DpmStatus(status) => {
             error!(
-                "Status!\nIndex: {:?}\nFacility Code: {:?}\nStatus Code: {:?}\nMessage: {:?}",
-                status.index, status.facility_code, status.status_code, status.message
+                "Status!\nDevice: {:?}\nAlarm Type: {:?}\nFacility Code: {:?}\nStatus Code: {:?}\nMessage: {:?}",
+                status.device,
+                status.alarm_type,
+                status.facility_code,
+                status.status_code,
+                status.message
             );
         }
     }
@@ -70,32 +74,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
     let mut client = DevDBClient::connect(&endpoint).await?;
 
-    let names = vec![];
+    let names = vec![
+        "G:AMANDA".to_string(),
+        "M:OUTTMP".to_string(),
+        "B:MH1".to_string(),
+        "I:21AIRP".to_string(),
+        "I:IP100F".to_string(),
+        "B:BL0260".to_string(),
+    ];
 
-    match client.get_device_info(names.clone()).await {
-        Ok(summary) => {
-            info!("DEVICE INFO = {:#?}", summary);
-        }
-        Err(e) => error!("DevDB error: {e:?}"),
-    }
-
+    let mut device_list = vec![];
     match client.get_all_alarm_info(names).await {
-        Ok(alarms) => info!("ALARM INFO = {:#?}", alarms),
+        Ok(alarms) => device_list = alarms,
         Err(e) => error!("DevDB alarm error: {e:?}"),
     }
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
-    let device_list = vec![
-        AlarmRequest {
-            device: "G:AMANDA".to_string(),
-            alarm_type: dpm::AlarmType::AnalogAlarm,
-        },
-        AlarmRequest {
-            device: "G:AMANDA".to_string(),
-            alarm_type: dpm::AlarmType::DigitalAlarm,
-        },
-    ];
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
     match dpm::fetch_alarms(dpm_endpoint, device_list).await {
         Ok(mut stream) => {

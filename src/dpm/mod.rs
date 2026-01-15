@@ -27,6 +27,7 @@ pub enum DpmData {
 pub struct DpmReading {
     pub index: u32,
     pub device: String,
+    pub alarm_type: AlarmType,
     pub timestamp: DateTime<Utc>,
     pub data: value::Value,
 }
@@ -35,11 +36,13 @@ pub struct DpmReading {
 pub struct DpmStatus {
     pub index: u32,
     pub device: String,
-    pub facility_code: i32,
-    pub status_code: i32,
+    pub alarm_type: AlarmType,
+    pub facility_code: u8,
+    pub status_code: i8,
     pub message: String,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum AlarmType {
     AnalogAlarm,
     DigitalAlarm,
@@ -74,21 +77,27 @@ pub async fn fetch_alarms(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let drf_list = device_list.iter().map(build_drf).collect::<Vec<_>>();
+
+    tracing::info!("Starting DAQ read for {} alarm requests", device_list.len());
+
+    tracing::info!("DRFs sent to DAQ: {:?}", drf_list);
+
     let mut client = DaqClient::connect(endpoint).await?;
     let stream = client
         .read(ReadingList { drf: drf_list })
         .await?
         .into_inner();
 
-    let parsed_stream = stream.map(move |res| match res {
-        Ok(reply) => {
-            let device = device_list
-                .get(reply.index as usize)
-                .map(|req| req.device.clone())
-                .unwrap_or_else(|| "unknown".to_string());
-            parse_reply(&reply, device)
+    let parsed_stream = stream.map(move |res| {
+        tracing::info!("Received reply from DAQ stream");
+
+        match res {
+            Ok(reply) => {
+                let device = device_list.get(reply.index as usize).unwrap();
+                parse_reply(&reply, device)
+            }
+            Err(status) => Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>),
         }
-        Err(status) => Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>),
     });
 
     Ok(parsed_stream)
@@ -96,11 +105,17 @@ pub async fn fetch_alarms(
 
 pub fn parse_reply(
     reply: &ReadingReply,
-    device: String,
+    device_request: &AlarmRequest,
 ) -> Result<DpmData, Box<dyn std::error::Error + Send + Sync>> {
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
+            tracing::info!(
+                "Parsing DAQ reading for device {} (alarm type {:?})",
+                device_request.device,
+                device_request.alarm_type
+            );
+
             let reading = readings.reading.first().ok_or("No readings in reply")?;
             let raw_timestamp = reading
                 .timestamp
@@ -108,7 +123,8 @@ pub fn parse_reply(
                 .ok_or_else(|| "missing timestamp".to_string())?;
             Ok(DpmData::DpmReading(DpmReading {
                 index: reply_index,
-                device,
+                device: device_request.device.clone(),
+                alarm_type: device_request.alarm_type,
                 timestamp: Utc
                     .timestamp_opt(raw_timestamp.seconds, raw_timestamp.nanos as u32)
                     .single()
@@ -122,13 +138,24 @@ pub fn parse_reply(
                     .ok_or_else(|| "missing data value".to_string())?,
             }))
         }
-        Some(reading_reply::Value::Status(status)) => Ok(DpmData::DpmStatus(DpmStatus {
-            index: reply_index,
-            device,
-            facility_code: status.facility_code,
-            status_code: status.status_code,
-            message: status.message.clone(),
-        })),
+        Some(reading_reply::Value::Status(status)) => {
+            tracing::error!(
+                "DAQ status reply for device {}: facility={}, status={}, message={}",
+                device_request.device,
+                status.facility_code,
+                status.status_code,
+                status.message
+            );
+
+            Ok(DpmData::DpmStatus(DpmStatus {
+                index: reply_index,
+                device: device_request.device.clone(),
+                alarm_type: device_request.alarm_type,
+                facility_code: status.facility_code as u8,
+                status_code: (status.facility_code + status.status_code * 256) as i8,
+                message: status.message.clone(),
+            }))
+        }
         None => Err(Box::new(DaqError {
             error_text: "Empty reply value".to_string(),
         })),
@@ -178,13 +205,17 @@ mod test {
                 message: "DPM PEND".to_string(),
             })),
         };
-        let parsed = parse_reply(&status_reply, "M:OUTTMP".to_string());
+        let request = AlarmRequest {
+            device: "M:OUTTMP".to_string(),
+            alarm_type: AlarmType::AnalogAlarm,
+        };
+        let parsed = parse_reply(&status_reply, &request);
         match parsed {
             Ok(DpmData::DpmStatus(status)) => {
                 assert_eq!(status.index, 0, "Incorrect index");
                 assert_eq!(status.device, "M:OUTTMP".to_string(), "Incorrect Device");
                 assert_eq!(status.facility_code, 1, "Incorrect facility code");
-                assert_eq!(status.status_code, 2, "Incorrect status code");
+                assert_eq!(status.status_code, 1, "Incorrect status code");
                 assert_eq!(status.message, "DPM PEND".to_string(), "Incorrect message");
             }
             _ => panic!("Expected parsed data to be Status"),
@@ -221,9 +252,15 @@ mod test {
             })),
         };
 
+        let request = AlarmRequest {
+            device: "test_device".to_string(),
+            alarm_type: AlarmType::AnalogAlarm,
+        };
+
         let parsed_data = DpmData::DpmReading(DpmReading {
             index: 0,
             device: "test_device".to_string(),
+            alarm_type: AlarmType::AnalogAlarm,
             timestamp: now,
             data: value::Value::AnaAlarm(AnalogAlarm {
                 minimum: 1.0,
@@ -237,10 +274,7 @@ mod test {
             }),
         });
 
-        assert_eq!(
-            parse_reply(&analog_reply, "test_device".to_string()).unwrap(),
-            parsed_data
-        );
+        assert_eq!(parse_reply(&analog_reply, &request).unwrap(), parsed_data);
     }
 
     #[test]
@@ -273,9 +307,15 @@ mod test {
             })),
         };
 
+        let request = AlarmRequest {
+            device: "M:OUTTMP".to_string(),
+            alarm_type: AlarmType::DigitalAlarm,
+        };
+
         let parsed_data = DpmData::DpmReading(DpmReading {
             index: 0,
             device: "M:OUTTMP".to_string(),
+            alarm_type: AlarmType::DigitalAlarm,
             timestamp: now,
             data: value::Value::DigAlarm(DigitalAlarm {
                 nominal: 1,
@@ -289,10 +329,7 @@ mod test {
             }),
         });
 
-        assert_eq!(
-            parse_reply(&digital_reply, "M:OUTTMP".to_string()).unwrap(),
-            parsed_data
-        );
+        assert_eq!(parse_reply(&digital_reply, &request).unwrap(), parsed_data);
     }
 
     #[test]
