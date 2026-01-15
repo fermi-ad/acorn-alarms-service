@@ -77,18 +77,27 @@ pub async fn fetch_alarms(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let drf_list = device_list.iter().map(build_drf).collect::<Vec<_>>();
+
+    tracing::info!("Starting DAQ read for {} alarm requests", device_list.len());
+
+    tracing::info!("DRFs sent to DAQ: {:?}", drf_list);
+
     let mut client = DaqClient::connect(endpoint).await?;
     let stream = client
         .read(ReadingList { drf: drf_list })
         .await?
         .into_inner();
 
-    let parsed_stream = stream.map(move |res| match res {
-        Ok(reply) => {
-            let device = device_list.get(reply.index as usize).unwrap();
-            parse_reply(&reply, device)
+    let parsed_stream = stream.map(move |res| {
+        tracing::info!("Received reply from DAQ stream");
+
+        match res {
+            Ok(reply) => {
+                let device = device_list.get(reply.index as usize).unwrap();
+                parse_reply(&reply, device)
+            }
+            Err(status) => Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>),
         }
-        Err(status) => Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>),
     });
 
     Ok(parsed_stream)
@@ -101,6 +110,12 @@ pub fn parse_reply(
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
+            tracing::info!(
+                "Parsing DAQ reading for device {} (alarm type {:?})",
+                device_request.device,
+                device_request.alarm_type
+            );
+
             let reading = readings.reading.first().ok_or("No readings in reply")?;
             let raw_timestamp = reading
                 .timestamp
@@ -123,14 +138,24 @@ pub fn parse_reply(
                     .ok_or_else(|| "missing data value".to_string())?,
             }))
         }
-        Some(reading_reply::Value::Status(status)) => Ok(DpmData::DpmStatus(DpmStatus {
-            index: reply_index,
-            device: device_request.device.clone(),
-            alarm_type: device_request.alarm_type,
-            facility_code: status.facility_code as u8,
-            status_code: (status.facility_code + status.status_code * 256) as i8,
-            message: status.message.clone(),
-        })),
+        Some(reading_reply::Value::Status(status)) => {
+            tracing::error!(
+                "DAQ status reply for device {}: facility={}, status={}, message={}",
+                device_request.device,
+                status.facility_code,
+                status.status_code,
+                status.message
+            );
+
+            Ok(DpmData::DpmStatus(DpmStatus {
+                index: reply_index,
+                device: device_request.device.clone(),
+                alarm_type: device_request.alarm_type,
+                facility_code: status.facility_code as u8,
+                status_code: (status.facility_code + status.status_code * 256) as i8,
+                message: status.message.clone(),
+            }))
+        }
         None => Err(Box::new(DaqError {
             error_text: "Empty reply value".to_string(),
         })),

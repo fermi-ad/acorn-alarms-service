@@ -18,19 +18,44 @@ impl DevDBClient {
 
     /// Fetch alarm info
     pub async fn get_all_alarm_info(&mut self, names: Vec<String>) -> Result<Vec<AlarmRequest>> {
+        // logging for when data is requested from devdb
+        tracing::info!(
+            "Requesting alarm info from DevDB for {} devices: {:?}",
+            names.len(),
+            names
+        );
         let req = Request::new(DeviceList { device: names });
 
         let reply: AlarmInfoReply = self.inner.get_all_alarm_info(req).await?.into_inner();
 
+        // Log how much data DevDB returned
+        tracing::info!(
+            "DevDB returned {} alarm info entries",
+            reply.alarm_info.len()
+        );
+
         let alarm_requests: Vec<AlarmRequest> = reply
             .alarm_info
             .iter()
-            .map(|alarm_info| build_alarm_request(&alarm_info))
+            .map(|alarm_info| {
+                // each alarm entry
+                tracing::info!(
+                    "DevDB alarm entry -> device: {}, pi: {:?}",
+                    alarm_info.device_name,
+                    alarm_info.alarm_block.as_ref().map(|b| b.pi)
+                );
+
+                build_alarm_request(alarm_info)
+            })
             .collect();
+
+        // Log whats produced for DPM
+        tracing::info!("Built {} AlarmRequests for DPM", alarm_requests.len());
 
         Ok(alarm_requests)
     }
 }
+
 fn build_alarm_request(alarm_info: &AlarmInfo) -> AlarmRequest {
     AlarmRequest {
         device: alarm_info.device_name.clone(),
