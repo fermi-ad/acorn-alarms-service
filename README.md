@@ -49,20 +49,25 @@ The following environment variables may be set to configure the associated syste
 
 ```mermaid
 stateDiagram-v2
-  OK --> BYPASSED: +Bypass
-  OK --> ALARMED: +Device alarm
-  BYPASSED --> OK: +Unbypass (Device ok)
-  BYPASSED --> ALARMED: +Unbypass (Device alarm)
-  ALARMED --> BYPASSED: +Bypass
-  ALARMED --> OK: +Device ok (Not latching)
-  ALARMED --> LATCHED: +Device ok (Latching)
-  ALARMED --> ACKNOWLEDGED: +Acknowledge
-  ACKNOWLEDGED --> BYPASSED: +Bypass
-  ACKNOWLEDGED --> OK: +Device ok
-  LATCHED --> BYPASSED: +Bypass
-  LATCHED --> OK: +Acknowledge
-  style OK fill:#F0FFF0
-  style LATCHED fill:#F0FFF0
-  style ALARMED fill:#FFF0F0
-  style ACKNOWLEDGED fill:#FFF0F0
+  OK --> BYPASSED: Bypass
+  OK --> ALARMED: Device alarm
+
+  BYPASSED --> OK: Unbypass (Device ok)
+  BYPASSED --> ALARMED: Unbypass (Device alarm)
+
+  ALARMED --> BYPASSED: Bypass
+  ALARMED --> OK: Device ok (Not latching)
+  ALARMED --> LATCHED: Device ok (Latching)
+  ALARMED --> ACKNOWLEDGED: Acknowledge
+
+  ACKNOWLEDGED --> BYPASSED: Bypass
+  ACKNOWLEDGED --> OK: Device ok
+
+  LATCHED --> BYPASSED: Bypass
+  LATCHED --> OK: Acknowledge
+
+  style OK            fill:#F0FFF0
+  style LATCHED       fill:#F0FFF0
+  style ALARMED       fill:#FFF0F0
+  style ACKNOWLEDGED  fill:#FFF0F0
 ```
