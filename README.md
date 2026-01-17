@@ -61,4 +61,6 @@ stateDiagram-v2
   ACKNOWLEDGED --> OK: +Device ok
   LATCHED --> BYPASSED: +Bypass
   LATCHED --> OK: +Acknowledge
+  style OK fill:#F0FFF0
+  style ALARMED fill:#FFF0F0
 ```
