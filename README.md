@@ -62,5 +62,7 @@ stateDiagram-v2
   LATCHED --> BYPASSED: +Bypass
   LATCHED --> OK: +Acknowledge
   style OK fill:#F0FFF0
+  style LATCHED fill:#F0FFF0
   style ALARMED fill:#FFF0F0
+  style ACKNOWLEDGED fill:#FFF0F0
 ```
