@@ -19,7 +19,7 @@ The following environment variables may be set to configure the associated syste
 
 ### Startup
 
-- Determine the set of all device alarms.
+- Determine the set of all device alarms
   - Request all Devices having analog and/or digital alarms from an ACNET Device gRPC service
   - Request all Devices (i.e. PV's) having value alarms from an EPICS Device gRPC service
 - If necessary, read the initial alarm state of every device alarm (TBD - we may get this for free by setting the listeners below)
@@ -33,6 +33,7 @@ The following environment variables may be set to configure the associated syste
 ### Alarm Listening
 
 - Report changes of alarm states by adding records to a Kafka service
+- Monitor Kafka for changes from other clients (ACORN or Phoebus)
 
 | Kafka       | Device  | ACORN          | Description
 |-------------|---------|----------------|------------
@@ -45,10 +46,17 @@ The following environment variables may be set to configure the associated syste
 - Periodically re-request the set of all device alarms
   - Cancel and re-issue alarm listening requests if device alarm set has changed
 
-### Alarm States
+### Device/Kafka Alarm States
 
-```mermaid
-stateDiagram-v2
+- Device is source of truth for alarm (ACNET and EPICS)
+- Device is source of truth for bypass (ACNET)
+- Kafka is source of truth for bypass (EPICS)
+- Kafka is source of truth for acknowledge (ACNET and EPICS)
+- Complete alarm state information can always be read from Kafka
+
+### Server State Transitions
+
+```mermaid stateDiagram-v2
   OK --> BYPASSED: Bypass
   OK --> ALARMED: Device alarm
 
@@ -71,3 +79,11 @@ stateDiagram-v2
   style ALARMED       fill:#FFF0F0
   style ACKNOWLEDGED  fill:#FFF0F0
 ```
+
+### Alarm Lists
+
+### User Actions
+
+- Acknowledge Alarm
+- Bypass/Unbypass Alarm
+- Add/Edit/Remove Alarm List
