@@ -33,8 +33,8 @@ The following environment variables may be set to configure the associated syste
 ### Alarm Listening
 
 - Report changes of alarm states by adding records to a Kafka service
-- Monitor Kafka for changes from other clients (ACORN or Phoebus)
-- Periodically re-request the set of all device alarms
+- Monitor Kafka for changes from clients (ACORN or Phoebus)
+- Periodically re-request the set of all device alarms from Device gRPC service(s)
   - Cancel and re-issue alarm listening requests if device alarm set has changed
 
 ### Device/Kafka Alarm States
