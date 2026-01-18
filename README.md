@@ -34,6 +34,10 @@ The following environment variables may be set to configure the associated syste
 
 - Report changes of alarm states by adding records to a Kafka service
 - Monitor Kafka for changes from other clients (ACORN or Phoebus)
+- Periodically re-request the set of all device alarms
+  - Cancel and re-issue alarm listening requests if device alarm set has changed
+
+### Device/Kafka Alarm States
 
 | Kafka       | Device  | ACORN          | Description
 |-------------|---------|----------------|------------
@@ -43,11 +47,6 @@ The following environment variables may be set to configure the associated syste
 | `ALARM_ACK` | `ALARM` | `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
 | `ALARM`     | `OK`    | `LATCHED`      | There was an alarm but no user acknowledged it
 
-- Periodically re-request the set of all device alarms
-  - Cancel and re-issue alarm listening requests if device alarm set has changed
-
-### Device/Kafka Alarm States
-
 - Device is source of truth for alarm (ACNET and EPICS)
 - Device is source of truth for bypass (ACNET)
 - Kafka is source of truth for bypass (EPICS)
@@ -56,7 +55,8 @@ The following environment variables may be set to configure the associated syste
 
 ### Server State Transitions
 
-```mermaid stateDiagram-v2
+```mermaid
+stateDiagram-v2
   OK --> BYPASSED: Bypass
   OK --> ALARMED: Device alarm
 
