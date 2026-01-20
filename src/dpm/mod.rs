@@ -43,7 +43,7 @@ pub struct DpmStatus {
     pub message: String,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum AlarmType {
     Analog,
     Digital,

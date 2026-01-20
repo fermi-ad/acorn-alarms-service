@@ -6,10 +6,9 @@ mod dpm;
 use dpm::DpmData;
 
 mod proto;
+use devdb_client::DevDBClient;
 use proto::common::device::value::Value;
-use proto::services::{
-    devdb::dev_db_client::DevDbClient, ioc_alarms::ioc_alarms_client::IocAlarmsClient,
-};
+use proto::services::ioc_alarms::ioc_alarms_client::IocAlarmsClient;
 
 mod report;
 use report::AlarmsReporter;
@@ -19,6 +18,7 @@ use tokio_stream::StreamExt;
 
 use rust_env_var_lib::env_var;
 
+use crate::dpm::AlarmRequest;
 use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
@@ -83,22 +83,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
 
-    let mut client = DevDbClient::connect(endpoint.to_string()).await?;
+    let mut client = DevDBClient::connect(&endpoint).await?;
 
-    let names = vec![
-        "G:AMANDA".to_string(),
-        "M:OUTTMP".to_string(),
-        "B:MH1".to_string(),
-        "I:21AIRP".to_string(),
-        "I:IP100F".to_string(),
-        "B:BL0260".to_string(),
-        "Z:ACLTST".to_string(),
-    ];
+    let names = vec![];
 
-    let mut device_list = vec![];
-    match devdb_client::get_alarm_info(&mut client, names).await {
-        Ok(alarms) => device_list = alarms,
-        Err(e) => error!("ACNET Device DB error: {e:?}"),
+    let mut device_list: Vec<AlarmRequest> = vec![];
+
+    match client.get_all_alarm_info(names).await {
+        Ok(alarms) => {
+            device_list = alarms;
+            // total alarm blocks (1 AlarmRequest == 1 alarm block == 1 DRF sent later)
+            let total_blocks = device_list.len();
+
+            // unique device names
+            use std::collections::HashSet;
+            let unique_devices: HashSet<String> =
+                device_list.iter().map(|a| a.device.clone()).collect();
+
+            // counts by alarm type
+            let mut analog_count = 0usize;
+            let mut digital_count = 0usize;
+            for a in &device_list {
+                match a.alarm_type {
+                    crate::dpm::AlarmType::Analog => analog_count += 1,
+                    crate::dpm::AlarmType::Digital => digital_count += 1,
+                    //new
+                    crate::dpm::AlarmType::Value => {}
+                }
+            }
+
+            info!(
+                "DevDB -> total alarm blocks: {}, unique devices: {}, analog blocks: {}, digital blocks: {}",
+                total_blocks,
+                unique_devices.len(),
+                analog_count,
+                digital_count
+            );
+        }
+        Err(e) => error!(" DevDB error: {e:?}"),
     }
 
     //  connect and query EPICS Device DB
@@ -120,6 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
+
+    info!("Calling DPM with {} alarm blocks", device_list.len());
+
     match dpm::fetch_alarms(dpm_endpoint, device_list).await {
         Ok(mut stream) => {
             while let Some(data) = stream.next().await {
