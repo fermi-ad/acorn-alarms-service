@@ -26,7 +26,7 @@ const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
 
 const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
-const DEFAULT_EPICS_DEV_DB_ADDR: &str = "DEFAULT_EPICS_DEV_DB_ADDR";
+const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
 
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
@@ -114,9 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(alarms) => epics_device_list = alarms,
         Err(e) => error!("EPICS Device DB error: {e:?}"),
     }
-
-    //  TEMPORARY - append epics to acnet
-    device_list.append(&mut epics_device_list);
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));

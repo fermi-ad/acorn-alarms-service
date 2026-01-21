@@ -16,11 +16,22 @@ impl EpicsDevDBClient {
     }
 
     pub async fn get_all_alarm_info(&mut self, names: Vec<String>) -> Result<Vec<AlarmRequest>> {
+        tracing::info!(
+            "Requesting alarm info from EPICS Device DB for {} devices: {:?}",
+            names.len(),
+            names
+        );
+
         let request = Request::new(IocAlarmsRequest {
             pv_name_list: names,
         });
 
         let response: IocAlarmsResponse = self.inner.get_ioc_alarms(request).await?.into_inner();
+
+        tracing::info!(
+            "EPICS Device DB returned {} alarm info entries",
+            response.alarm_info.len()
+        );
 
         let alarm_requests: Vec<AlarmRequest> = response
             .alarm_info
@@ -30,6 +41,11 @@ impl EpicsDevDBClient {
                 alarm_type: crate::dpm::AlarmType::AnalogAlarm,
             })
             .collect();
+
+        tracing::info!(
+            "EPICS Device DB built {} AlarmRequests for DPM",
+            alarm_requests.len()
+        );
 
         Ok(alarm_requests)
     }
