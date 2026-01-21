@@ -1,4 +1,4 @@
-use crate::dpm::AlarmRequest;
+use crate::dpm::{AlarmRequest, AlarmType};
 use crate::proto::services::ioc_alarms::{
     IocAlarmsRequest, IocAlarmsResponse, ioc_alarms_client::IocAlarmsClient,
 };
@@ -38,7 +38,7 @@ impl EpicsDevDBClient {
             .iter()
             .map(|alarm_info| AlarmRequest {
                 device: alarm_info.pv_name.clone(),
-                alarm_type: crate::dpm::AlarmType::AnalogAlarm,
+                alarm_type: AlarmType::AnalogAlarm,
             })
             .collect();
 

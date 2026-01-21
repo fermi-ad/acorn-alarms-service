@@ -109,11 +109,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "PIP2CP:RCVRY_CRYO_PT1418:Pressure".to_string(),
     ];
 
-    let mut epics_device_list = vec![];
+    let mut _epics_device_list = vec![];
     match epics_client.get_all_alarm_info(epics_names).await {
-        Ok(alarms) => epics_device_list = alarms,
+        Ok(alarms) => _epics_device_list = alarms,
         Err(e) => error!("EPICS Device DB error: {e:?}"),
     }
+
+    //  TODO: make use of _epics_device_list
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
