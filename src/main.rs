@@ -78,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Acorn Alarms Service starting…");
 
+    //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
     let mut client = DevDBClient::connect(&endpoint).await?;
 
@@ -88,17 +89,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "I:21AIRP".to_string(),
         "I:IP100F".to_string(),
         "B:BL0260".to_string(),
+        "Z:ACLTST".to_string(),
     ];
 
     let mut device_list = vec![];
     match client.get_all_alarm_info(names).await {
         Ok(alarms) => device_list = alarms,
-        Err(e) => error!("DevDB alarm error: {e:?}"),
+        Err(e) => error!("ACNET Device DB error: {e:?}"),
     }
 
+    //  connect and query EPICS Device DB
     let epics_endpoint =
         env_var::get(EPICS_DEV_DB_ADDR).or(String::from(DEFAULT_EPICS_DEV_DB_ADDR));
     let mut epics_client = EpicsDevDBClient::connect(&epics_endpoint).await?;
+
+    let epics_names = vec![
+        "A0TST:IS_BLE_DNCNVa:Pressure".to_string(),
+        "PIP2CP:RCVRY_CRYO_TT1379:Temp".to_string(),
+        "PIP2CP:RCVRY_CRYO_PT1418:Pressure".to_string(),
+    ];
+
+    let mut epics_device_list = vec![];
+    match epics_client.get_all_alarm_info(epics_names).await {
+        Ok(alarms) => epics_device_list = alarms,
+        Err(e) => error!("EPICS Device DB error: {e:?}"),
+    }
+
+    //  TEMPORARY - append epics to acnet
+    device_list.append(&mut epics_device_list);
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
