@@ -104,9 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut epics_client = EpicsDevDBClient::connect(&epics_endpoint).await?;
 
     let epics_names = vec![
-        "A0TST:IS_BLE_DNCNVa:Pressure".to_string(),
-        "PIP2CP:RCVRY_CRYO_TT1379:Temp".to_string(),
-        "PIP2CP:RCVRY_CRYO_PT1418:Pressure".to_string(),
+        "PIP2IT:pHB650_VAC_PPG051:VacP".to_string(),
+        "PIP2IT:pHB650_CRYO_TX103:TempK".to_string(),
     ];
 
     let mut _epics_device_list = vec![];
