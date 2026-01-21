@@ -20,7 +20,7 @@ impl DevDBClient {
     pub async fn get_all_alarm_info(&mut self, names: Vec<String>) -> Result<Vec<AlarmRequest>> {
         // logging for when data is requested from devdb
         tracing::info!(
-            "Requesting alarm info from DevDB for {} devices: {:?}",
+            "Requesting alarm info from ACNET Device DB for {} devices: {:?}",
             names.len(),
             names
         );
@@ -30,7 +30,7 @@ impl DevDBClient {
 
         // Log how much data DevDB returned
         tracing::info!(
-            "DevDB returned {} alarm info entries",
+            "ACNET Device DB returned {} alarm info entries",
             reply.alarm_info.len()
         );
 
@@ -40,17 +40,19 @@ impl DevDBClient {
             .map(|alarm_info| {
                 // each alarm entry
                 tracing::info!(
-                    "DevDB alarm entry -> device: {}, pi: {:?}",
+                    "ACNET Device DB alarm entry -> device: {}, pi: {:?}",
                     alarm_info.device_name,
                     alarm_info.alarm_block.as_ref().map(|b| b.pi)
                 );
-
                 build_alarm_request(alarm_info)
             })
             .collect();
 
         // Log whats produced for DPM
-        tracing::info!("Built {} AlarmRequests for DPM", alarm_requests.len());
+        tracing::info!(
+            "ACNET Device DB built {} AlarmRequests for DPM",
+            alarm_requests.len()
+        );
 
         Ok(alarm_requests)
     }

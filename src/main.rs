@@ -1,6 +1,9 @@
 mod devdb_client;
 use devdb_client::DevDBClient;
 
+mod epics_device_db;
+use epics_device_db::EpicsDevDBClient;
+
 mod dpm;
 use dpm::DpmData;
 
@@ -21,6 +24,10 @@ use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
+
+const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
+const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
+
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
 
@@ -71,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Acorn Alarms Service starting…");
 
+    //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
     let mut client = DevDBClient::connect(&endpoint).await?;
 
@@ -81,13 +89,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "I:21AIRP".to_string(),
         "I:IP100F".to_string(),
         "B:BL0260".to_string(),
+        "Z:ACLTST".to_string(),
     ];
 
     let mut device_list = vec![];
     match client.get_all_alarm_info(names).await {
         Ok(alarms) => device_list = alarms,
-        Err(e) => error!("DevDB alarm error: {e:?}"),
+        Err(e) => error!("ACNET Device DB error: {e:?}"),
     }
+
+    //  connect and query EPICS Device DB
+    let epics_endpoint =
+        env_var::get(EPICS_DEV_DB_ADDR).or(String::from(DEFAULT_EPICS_DEV_DB_ADDR));
+    let mut epics_client = EpicsDevDBClient::connect(&epics_endpoint).await?;
+
+    let epics_names = vec![
+        "PIP2IT:pHB650_VAC_PPG051:VacP".to_string(),
+        "PIP2IT:pHB650_CRYO_TX103:TempK".to_string(),
+    ];
+
+    let mut _epics_device_list = vec![];
+    match epics_client.get_all_alarm_info(epics_names).await {
+        Ok(alarms) => _epics_device_list = alarms,
+        Err(e) => error!("EPICS Device DB error: {e:?}"),
+    }
+
+    //  TODO: make use of _epics_device_list
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
