@@ -155,6 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => error!("DPM stream error: {:?}", e),
                 }
             }
+            error!("DPM stream ended (connection closed or server disconnected)");
         }
         Err(e) => error!("DPM ERROR: {:?}", e),
     };

@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
+use std::mem;
 
 use crate::proto::common::device::value;
 use crate::proto::services::daq::{
@@ -86,24 +87,40 @@ pub async fn fetch_alarms(
     tracing::info!("DRFs sent to DAQ: {:?}", drf_list);
 
     let mut client = DaqClient::connect(endpoint).await?;
-    let stream = client
-        .read(ReadingList { drf: drf_list })
-        .await?
-        .into_inner();
+    tracing::info!("Connected to DPM");
+    let stream = client.read(ReadingList { drf: drf_list }).await;
 
-    let parsed_stream = stream.map(move |res| {
-        tracing::info!("Received reply from DAQ stream");
+    match stream {
+        Ok(stream) => {
+            let parsed_stream = stream.into_inner().map(move |res| match res {
+                Ok(reply) => {
+                    tracing::debug!("Received reply from DAQ stream");
+                    println!("ReadingReply size: {}", mem::size_of_val(&reply));
+                    let device = device_list.get(reply.index as usize).unwrap();
+                    parse_reply(&reply, device)
+                }
+                Err(status) => {
+                    tracing::error!(
+                        "DAQ stream returned gRPC error status: code={:?}, message={}",
+                        status.code(),
+                        status.message()
+                    );
+                    Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>)
+                }
+            });
 
-        match res {
-            Ok(reply) => {
-                let device = device_list.get(reply.index as usize).unwrap();
-                parse_reply(&reply, device)
-            }
-            Err(status) => Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>),
+            Ok(parsed_stream)
         }
-    });
-
-    Ok(parsed_stream)
+        Err(err) => {
+            tracing::error!(
+                "Failed to establish DAQ stream: {} (likely connection closed or server unavailable)",
+                err
+            );
+            Err(Box::new(DaqError {
+                error_text: format!("Streaming Error: {}", err),
+            }))
+        }
+    }
 }
 
 pub fn parse_reply(
@@ -113,7 +130,7 @@ pub fn parse_reply(
     let reply_index = reply.index;
     match &reply.value {
         Some(reading_reply::Value::Readings(readings)) => {
-            tracing::info!(
+            tracing::debug!(
                 "Parsing DAQ reading for device {} (alarm type {:?})",
                 device_request.device,
                 device_request.alarm_type
