@@ -46,6 +46,7 @@ pub struct DpmStatus {
 pub enum AlarmType {
     AnalogAlarm,
     DigitalAlarm,
+    ValueAlarm,
 }
 
 pub struct AlarmRequest {
@@ -65,6 +66,7 @@ fn build_drf(request: &AlarmRequest) -> String {
     let request_properties = match request.alarm_type {
         AlarmType::AnalogAlarm => ".AA@Q",
         AlarmType::DigitalAlarm => ".DA@Q",
+        AlarmType::ValueAlarm => ".SEVR@Q",
     };
     format!("{}{}", request.device, request_properties)
 }
