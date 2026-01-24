@@ -1,6 +1,5 @@
 use crate::{
-    dpm::AlarmRequest,
-    dpm::AlarmType,
+    dpm::{AlarmRequest, AlarmType},
     proto::services::devdb::{AlarmInfo, AlarmInfoReply, DeviceList, dev_db_client::DevDbClient},
 };
 use anyhow::Result;

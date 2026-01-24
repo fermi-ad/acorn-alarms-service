@@ -2,8 +2,9 @@ use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
 
 use crate::proto::common::device::value;
-use crate::proto::services::daq::daq_client::DaqClient;
-use crate::proto::services::daq::{ReadingList, ReadingReply, reading_reply};
+use crate::proto::services::daq::{
+    ReadingList, ReadingReply, daq_client::DaqClient, reading_reply,
+};
 
 #[derive(Debug)]
 pub struct DaqError {
