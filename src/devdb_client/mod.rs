@@ -1,5 +1,6 @@
 use crate::{
     dpm::AlarmRequest,
+    dpm::AlarmType,
     proto::services::devdb::{AlarmInfo, AlarmInfoReply, DeviceList, dev_db_client::DevDbClient},
 };
 use anyhow::Result;
@@ -65,8 +66,8 @@ fn build_alarm_request(alarm_info: &AlarmInfo) -> AlarmRequest {
         // 5 -> signifies digital alarm block
         // Anything else should result in an error
         alarm_type: match alarm_info.alarm_block.as_ref().unwrap().pi {
-            1 => crate::dpm::AlarmType::AnalogAlarm,
-            5 => crate::dpm::AlarmType::DigitalAlarm,
+            1 => AlarmType::Analog,
+            5 => AlarmType::Digital,
             _ => panic!(),
         },
     }
