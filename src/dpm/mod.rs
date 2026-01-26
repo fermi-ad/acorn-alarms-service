@@ -21,8 +21,8 @@ impl std::error::Error for DaqError {}
 
 #[derive(Debug, PartialEq)]
 pub enum DpmData {
-    DpmReading(DpmReading),
-    DpmStatus(DpmStatus),
+    Reading(DpmReading),
+    Status(DpmStatus),
 }
 #[derive(Debug, PartialEq)]
 pub struct DpmReading {
@@ -124,7 +124,7 @@ pub fn parse_reply(
                 .timestamp
                 .as_ref()
                 .ok_or_else(|| "missing timestamp".to_string())?;
-            Ok(DpmData::DpmReading(DpmReading {
+            Ok(DpmData::Reading(DpmReading {
                 index: reply_index,
                 device: device_request.device.clone(),
                 alarm_type: device_request.alarm_type,
@@ -150,7 +150,7 @@ pub fn parse_reply(
                 status.message
             );
 
-            Ok(DpmData::DpmStatus(DpmStatus {
+            Ok(DpmData::Status(DpmStatus {
                 index: reply_index,
                 device: device_request.device.clone(),
                 alarm_type: device_request.alarm_type,
@@ -191,11 +191,11 @@ mod test {
 
     #[test]
     fn test_build_digital_drf() {
-        let analog_request = AlarmRequest {
+        let digital_request = AlarmRequest {
             device: "G:DEVICE".to_string(),
             alarm_type: AlarmType::Digital,
         };
-        assert_eq!(build_drf(&analog_request), "G:DEVICE.DA@Q");
+        assert_eq!(build_drf(&digital_request), "G:DEVICE.DA@Q");
     }
 
     #[test]
@@ -214,7 +214,7 @@ mod test {
         };
         let parsed = parse_reply(&status_reply, &request);
         match parsed {
-            Ok(DpmData::DpmStatus(status)) => {
+            Ok(DpmData::Status(status)) => {
                 assert_eq!(status.index, 0, "Incorrect index");
                 assert_eq!(status.device, "M:OUTTMP".to_string(), "Incorrect Device");
                 assert_eq!(status.facility_code, 1, "Incorrect facility code");
@@ -260,7 +260,7 @@ mod test {
             alarm_type: AlarmType::Analog,
         };
 
-        let parsed_data = DpmData::DpmReading(DpmReading {
+        let parsed_data = DpmData::Reading(DpmReading {
             index: 0,
             device: "test_device".to_string(),
             alarm_type: AlarmType::Analog,
@@ -315,7 +315,7 @@ mod test {
             alarm_type: AlarmType::Digital,
         };
 
-        let parsed_data = DpmData::DpmReading(DpmReading {
+        let parsed_data = DpmData::Reading(DpmReading {
             index: 0,
             device: "M:OUTTMP".to_string(),
             alarm_type: AlarmType::Digital,

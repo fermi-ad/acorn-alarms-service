@@ -1,6 +1,6 @@
-use crate::{
-    dpm::{AlarmRequest, AlarmType},
-    proto::services::devdb::{AlarmInfo, AlarmInfoReply, DeviceList, dev_db_client::DevDbClient},
+use crate::dpm::{AlarmRequest, AlarmType};
+use crate::proto::services::devdb::{
+    AlarmInfo, AlarmInfoReply, DeviceList, dev_db_client::DevDbClient,
 };
 use anyhow::Result;
 use tonic::Request;

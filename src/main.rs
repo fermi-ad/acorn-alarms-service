@@ -33,7 +33,7 @@ const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
-        DpmData::DpmReading(reading) => {
+        DpmData::Reading(reading) => {
             info!(
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
@@ -58,7 +58,7 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
                 alarms_reporter.report(reading.index, reading.timestamp, active_alarm);
             }
         }
-        DpmData::DpmStatus(status) => {
+        DpmData::Status(status) => {
             error!(
                 "Status!\nDevice: {:?}\nAlarm Type: {:?}\nFacility Code: {:?}\nStatus Code: {:?}\nMessage: {:?}",
                 status.device,
