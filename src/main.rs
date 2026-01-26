@@ -1,16 +1,15 @@
 mod devdb_client;
-use devdb_client::DevDBClient;
-
+mod epics;
 mod epics_device_db;
-use epics_device_db::EpicsDevDBClient;
 
 mod dpm;
 use dpm::DpmData;
 
 mod proto;
 use proto::common::device::value::Value;
-
-mod epics;
+use proto::services::{
+    devdb::dev_db_client::DevDbClient, ioc_alarms::ioc_alarms_client::IocAlarmsClient,
+};
 
 mod report;
 use report::AlarmsReporter;
@@ -83,7 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
-    let mut client = DevDBClient::connect(&endpoint).await?;
+
+    let mut client = DevDbClient::connect(endpoint.to_string()).await?;
 
     let names = vec![
         "G:AMANDA".to_string(),
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let mut device_list = vec![];
-    match client.get_all_alarm_info(names).await {
+    match devdb_client::get_alarm_info(&mut client, names).await {
         Ok(alarms) => device_list = alarms,
         Err(e) => error!("ACNET Device DB error: {e:?}"),
     }
@@ -104,12 +104,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //  connect and query EPICS Device DB
     let epics_endpoint =
         env_var::get(EPICS_DEV_DB_ADDR).or(String::from(DEFAULT_EPICS_DEV_DB_ADDR));
-    let mut epics_client = EpicsDevDBClient::connect(&epics_endpoint).await?;
+
+    let mut epics_client = IocAlarmsClient::connect(epics_endpoint.to_string()).await?;
 
     let epics_names = vec!["PIP2IT:pHB650_CRYO_TX103:TempK".to_string()];
 
     let mut epics_device_list = vec![];
-    match epics_client.get_all_alarm_info(epics_names).await {
+    match epics_device_db::get_alarm_info(&mut epics_client, epics_names).await {
         Ok(alarms) => epics_device_list = alarms,
         Err(e) => error!("EPICS Device DB error: {e:?}"),
     }
