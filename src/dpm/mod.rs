@@ -2,8 +2,9 @@ use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
 
 use crate::proto::common::device::value;
-use crate::proto::services::daq::daq_client::DaqClient;
-use crate::proto::services::daq::{ReadingList, ReadingReply, reading_reply};
+use crate::proto::services::daq::{
+    ReadingList, ReadingReply, daq_client::DaqClient, reading_reply,
+};
 
 #[derive(Debug)]
 pub struct DaqError {
@@ -44,8 +45,9 @@ pub struct DpmStatus {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum AlarmType {
-    AnalogAlarm,
-    DigitalAlarm,
+    Analog,
+    Digital,
+    Value,
 }
 
 pub struct AlarmRequest {
@@ -63,8 +65,9 @@ pub struct AlarmRequest {
 /// - Q: The event data will be returned. This will be periodic, and only be returned when the alarm block changes
 fn build_drf(request: &AlarmRequest) -> String {
     let request_properties = match request.alarm_type {
-        AlarmType::AnalogAlarm => ".AA@Q",
-        AlarmType::DigitalAlarm => ".DA@Q",
+        AlarmType::Analog => ".AA@Q",
+        AlarmType::Digital => ".DA@Q",
+        AlarmType::Value => ".SEVR@Q",
     };
     format!("{}{}", request.device, request_properties)
 }
@@ -181,7 +184,7 @@ mod test {
     fn test_build_analog_drf() {
         let analog_request = AlarmRequest {
             device: "G:DEVICE".to_string(),
-            alarm_type: AlarmType::AnalogAlarm,
+            alarm_type: AlarmType::Analog,
         };
         assert_eq!(build_drf(&analog_request), "G:DEVICE.AA@Q");
     }
@@ -190,7 +193,7 @@ mod test {
     fn test_build_digital_drf() {
         let analog_request = AlarmRequest {
             device: "G:DEVICE".to_string(),
-            alarm_type: AlarmType::DigitalAlarm,
+            alarm_type: AlarmType::Digital,
         };
         assert_eq!(build_drf(&analog_request), "G:DEVICE.DA@Q");
     }
@@ -207,7 +210,7 @@ mod test {
         };
         let request = AlarmRequest {
             device: "M:OUTTMP".to_string(),
-            alarm_type: AlarmType::AnalogAlarm,
+            alarm_type: AlarmType::Analog,
         };
         let parsed = parse_reply(&status_reply, &request);
         match parsed {
@@ -254,13 +257,13 @@ mod test {
 
         let request = AlarmRequest {
             device: "test_device".to_string(),
-            alarm_type: AlarmType::AnalogAlarm,
+            alarm_type: AlarmType::Analog,
         };
 
         let parsed_data = DpmData::DpmReading(DpmReading {
             index: 0,
             device: "test_device".to_string(),
-            alarm_type: AlarmType::AnalogAlarm,
+            alarm_type: AlarmType::Analog,
             timestamp: now,
             data: value::Value::AnaAlarm(AnalogAlarm {
                 minimum: 1.0,
@@ -309,13 +312,13 @@ mod test {
 
         let request = AlarmRequest {
             device: "M:OUTTMP".to_string(),
-            alarm_type: AlarmType::DigitalAlarm,
+            alarm_type: AlarmType::Digital,
         };
 
         let parsed_data = DpmData::DpmReading(DpmReading {
             index: 0,
             device: "M:OUTTMP".to_string(),
-            alarm_type: AlarmType::DigitalAlarm,
+            alarm_type: AlarmType::Digital,
             timestamp: now,
             data: value::Value::DigAlarm(DigitalAlarm {
                 nominal: 1,

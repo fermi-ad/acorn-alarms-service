@@ -38,7 +38,7 @@ impl EpicsDevDBClient {
             .iter()
             .map(|alarm_info| AlarmRequest {
                 device: alarm_info.pv_name.clone(),
-                alarm_type: AlarmType::AnalogAlarm,
+                alarm_type: AlarmType::Value,
             })
             .collect();
 

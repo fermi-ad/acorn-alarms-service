@@ -38,7 +38,6 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
-
             let mut should_report = false;
             let active_alarm = match reading.data {
                 Value::AnaAlarm(alrm) => {
@@ -48,6 +47,10 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
                 Value::DigAlarm(alrm) => {
                     should_report = true;
                     alrm.alarm_enable && alrm.alarm_status
+                }
+                Value::Text(sevr) => {
+                    should_report = true;
+                    sevr != "NO_ALARM"
                 }
                 _ => false,
             };
@@ -103,18 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env_var::get(EPICS_DEV_DB_ADDR).or(String::from(DEFAULT_EPICS_DEV_DB_ADDR));
     let mut epics_client = EpicsDevDBClient::connect(&epics_endpoint).await?;
 
-    let epics_names = vec![
-        "PIP2IT:pHB650_VAC_PPG051:VacP".to_string(),
-        "PIP2IT:pHB650_CRYO_TX103:TempK".to_string(),
-    ];
+    let epics_names = vec!["PIP2IT:pHB650_CRYO_TX103:TempK".to_string()];
 
-    let mut _epics_device_list = vec![];
+    let mut epics_device_list = vec![];
     match epics_client.get_all_alarm_info(epics_names).await {
-        Ok(alarms) => _epics_device_list = alarms,
+        Ok(alarms) => epics_device_list = alarms,
         Err(e) => error!("EPICS Device DB error: {e:?}"),
     }
 
-    //  TODO: make use of _epics_device_list
+    device_list.append(&mut epics_device_list);
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
