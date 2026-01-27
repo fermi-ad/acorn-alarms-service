@@ -119,9 +119,8 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn try_publish(&mut self, message: Message) -> bool {
-        let controls_published =
-            handle_publish(self.controls_publisher.publish(message.clone())) == true;
-        let pip_published = handle_publish(self.pip2_publisher.publish(message)) == true;
+        let controls_published = handle_publish(self.controls_publisher.publish(message.clone()));
+        let pip_published = handle_publish(self.pip2_publisher.publish(message));
 
         // Breaking it out into temp variables ensures both services are tried.
         // Publishing to PIP would be skipped if the calls to transmit_with_fallback were combined
@@ -186,10 +185,7 @@ mod tests {
 
         let cur_time = Utc::now();
         test_reporter.report(0, cur_time, false);
-        assert!(
-            test_reporter.known_alarms.is_empty(),
-            "An index was added to known alarms when it should not have been"
-        );
+        assert!(test_reporter.known_alarms.is_empty());
 
         test_reporter.report(0, cur_time, true);
 
@@ -233,10 +229,7 @@ mod tests {
 
         let cur_time = Utc::now();
         test_reporter.report(0, cur_time, false);
-        assert!(
-            test_reporter.known_alarms.is_empty(),
-            "The test index was not removed from the set of known alarms, when it should have been"
-        );
+        assert!(test_reporter.known_alarms.is_empty());
         assert!(test_reporter.controls_publisher.latest.is_some());
         assert!(test_reporter.pip2_publisher.latest.is_some());
     }
