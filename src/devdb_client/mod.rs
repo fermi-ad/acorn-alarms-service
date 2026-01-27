@@ -22,22 +22,17 @@ impl DevDBClient {
     pub async fn get_all_alarm_info(&mut self, names: Vec<String>) -> Result<Vec<AlarmRequest>> {
         // logging for when data is requested from devdb
         tracing::info!(
-            "Requesting alarm info from ACNET Device DB for {} devices: {:?}",
+            "Requesting alarm info from DevDB for {} devices: {:?}",
             names.len(),
             names
         );
         let req = Request::new(DeviceList { device: names });
+
         let reply: AlarmInfoReply = self.inner.get_all_alarm_info(req).await?.into_inner();
 
         // Log how much data DevDB returned
         tracing::info!(
             "DevDB returned {} alarm info entries",
-            reply.alarm_info.len()
-        );
-
-        // Log how much data DevDB returned
-        tracing::info!(
-            "ACNET Device DB returned {} alarm info entries",
             reply.alarm_info.len()
         );
 
@@ -82,8 +77,9 @@ impl DevDBClient {
 fn build_alarm_request(alarm_info: &AlarmInfo) -> AlarmRequest {
     AlarmRequest {
         device: alarm_info.device_name.clone(),
-        // 1 -> signifies analog alarm block
+        // 1 -> signifies analaog alarm block
         // 5 -> signifies digital alarm block
+        // Anything else should result in an error
         alarm_type: match alarm_info.alarm_block.as_ref().unwrap().pi {
             1 => crate::dpm::AlarmType::Analog,
             5 => crate::dpm::AlarmType::Digital,

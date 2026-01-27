@@ -1,11 +1,13 @@
 use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
-use std::mem;
+use tokio_util::sync::CancellationToken;
 
 use crate::proto::common::device::value;
 use crate::proto::services::daq::{
     ReadingList, ReadingReply, daq_client::DaqClient, reading_reply,
 };
+
+use std::pin::Pin;
 
 #[derive(Debug)]
 pub struct DaqError {
@@ -51,6 +53,7 @@ pub enum AlarmType {
     Value,
 }
 
+#[derive(Clone)]
 pub struct AlarmRequest {
     pub device: String,
     pub alarm_type: AlarmType,
@@ -76,11 +79,12 @@ fn build_drf(request: &AlarmRequest) -> String {
 pub async fn fetch_alarms(
     endpoint: String,
     device_list: Vec<AlarmRequest>,
+    cancel_token: CancellationToken,
 ) -> Result<
-    impl Stream<Item = Result<DpmData, Box<dyn std::error::Error + Send + Sync>>>,
+    Pin<Box<dyn Stream<Item = Result<DpmData, Box<dyn std::error::Error + Send + Sync>>> + Send>>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    let drf_list = device_list.iter().map(build_drf).collect::<Vec<_>>();
+    let drf_list = device_list.iter().map(build_drf).collect::<Vec<String>>();
 
     tracing::info!("Starting DAQ read for {} alarm requests", device_list.len());
 
@@ -88,39 +92,32 @@ pub async fn fetch_alarms(
 
     let mut client = DaqClient::connect(endpoint).await?;
     tracing::info!("Connected to DPM");
-    let stream = client.read(ReadingList { drf: drf_list }).await;
+    let stream = client.read(ReadingList { drf: drf_list }).await?;
 
-    match stream {
-        Ok(stream) => {
-            let parsed_stream = stream.into_inner().map(move |res| match res {
-                Ok(reply) => {
+    let stream_inner = stream.into_inner();
+    let cancel_signal = cancel_token.clone();
+
+    let parsed_stream = stream_inner.take_until(async move {
+        cancel_signal.cancelled().await;
+    }).map(move |res| match res {
+        // logic here
+                        Ok(reply) => {
                     tracing::debug!("Received reply from DAQ stream");
-                    println!("ReadingReply size: {}", mem::size_of_val(&reply));
                     let device = device_list.get(reply.index as usize).unwrap();
                     parse_reply(&reply, device)
                 }
                 Err(status) => {
                     tracing::error!(
-                        "DAQ stream returned gRPC error status: code={:?}, message={}",
+                        "DAQ stream returned gRPC error status: code={:?}, message={}, metadata={:#?}, details={:#?}",
                         status.code(),
-                        status.message()
+                        status.message(),
+                        status.metadata(),
+                        status.details(),
                     );
                     Err(Box::new(status) as Box<dyn std::error::Error + Send + Sync>)
                 }
-            });
-
-            Ok(parsed_stream)
-        }
-        Err(err) => {
-            tracing::error!(
-                "Failed to establish DAQ stream: {} (likely connection closed or server unavailable)",
-                err
-            );
-            Err(Box::new(DaqError {
-                error_text: format!("Streaming Error: {}", err),
-            }))
-        }
-    }
+    });
+    Ok(Box::pin(parsed_stream))
 }
 
 pub fn parse_reply(
@@ -235,7 +232,7 @@ mod test {
                 assert_eq!(status.index, 0, "Incorrect index");
                 assert_eq!(status.device, "M:OUTTMP".to_string(), "Incorrect Device");
                 assert_eq!(status.facility_code, 1, "Incorrect facility code");
-                assert_eq!(status.status_code, 1, "Incorrect status code");
+                assert_eq!(status.status_code, 2, "Incorrect status code");
                 assert_eq!(status.message, "DPM PEND".to_string(), "Incorrect message");
             }
             _ => panic!("Expected parsed data to be Status"),

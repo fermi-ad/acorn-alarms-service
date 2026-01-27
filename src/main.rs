@@ -14,26 +14,24 @@ mod report;
 use report::AlarmsReporter;
 
 use rust_pubsub_lib::{Publisher, kafka_impl::KafkaPublisher};
+use tokio::signal;
 use tokio_stream::StreamExt;
+use tokio_util::sync::CancellationToken;
 
 use rust_env_var_lib::env_var;
 
 use crate::dpm::AlarmRequest;
-use tracing::{Level, error, info};
+use tracing::{Level, debug, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
-const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
-
-const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
-const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
-
+const DEFAULT_DEV_DB_ADDR: &str = "http://localhost:6802";
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
-        DpmData::Reading(reading) => {
-            info!(
+        DpmData::DpmReading(reading) => {
+            debug!(
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
@@ -78,13 +76,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
 
+    let cancellation_token = CancellationToken::new();
+    let main_cancel_token = cancellation_token.clone();
+
+    // Set up Ctrl+C handler for graceful shutdown
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                info!("Shutdown signal received (Ctrl+C)");
+                main_cancel_token.cancel();
+            }
+            Err(err) => {
+                error!("Error listening for Ctrl+C: {}", err);
+            }
+        }
+    });
+
     info!("Acorn Alarms Service starting…");
 
-    //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
 
     let mut client = DevDBClient::connect(&endpoint).await?;
 
+    let names = vec![];
     let names = vec![];
 
     let mut device_list: Vec<AlarmRequest> = vec![];
@@ -143,22 +157,79 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
 
+    // REMOVE THIS
+    // device_list = device_list.drain(0..10000).collect();
+
     info!("Calling DPM with {} alarm blocks", device_list.len());
 
-    match dpm::fetch_alarms(dpm_endpoint, device_list).await {
-        Ok(mut stream) => {
-            while let Some(data) = stream.next().await {
-                match data {
-                    Ok(dpm_data) => {
-                        handle_daq_data(dpm_data, &mut alarms_reporter);
+    // chunk up device list
+    let chunk_size = 500;
+    info!(
+        "Total batches: {}, batch size: {}",
+        device_list.len() / chunk_size + 1,
+        chunk_size
+    );
+
+    let mut task_set = tokio::task::JoinSet::new();
+
+    for chunk in device_list.chunks(chunk_size) {
+        let batch = chunk.to_vec();
+        let endpoint = dpm_endpoint.clone();
+        let cancel_token = cancellation_token.clone();
+
+        // spawn tasks for each chunk
+        task_set.spawn(async move {
+            loop {
+                if cancel_token.is_cancelled() {
+                    break;
+                }
+
+                info!("Attempting connection for batch of {}", batch.len());
+                let result = dpm::fetch_alarms(
+                    endpoint.clone(),
+                    batch.clone(),
+                    cancel_token.clone(),
+                )
+                .await;
+
+                match result {
+                    Ok(mut stream) => {
+                        while let Some(item) = stream.next().await {
+                            match item {
+                                Ok(data) => {
+                                    // if sender.send(data).await.is_err() {
+                                    //     error!("Reporter channel closed. Exiting task.");
+                                    //     return;
+                                    // }
+                                    match data {
+                                        DpmData::DpmReading(reading) => {
+                                                        debug!(
+                "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
+                reading.device, reading.alarm_type, reading.timestamp, reading.data
+            );
+                                        },
+                                        DpmData::DpmStatus(_) =>{},
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Stream decoding error: {}. Retrying...", e);
+                                    break; // Break stream loop to reconnect
+                                }
+                            }
+                        }
                     }
-                    Err(e) => error!("DPM stream error: {:?}", e),
+                    Err(e) => error!("Failed to connect to DPM: {:?}", e),
                 }
             }
-            error!("DPM stream ended (connection closed or server disconnected)");
-        }
-        Err(e) => error!("DPM ERROR: {:?}", e),
-    };
+        });
+    }
 
+    info!("All streams active. Press Ctrl+C to stop.");
+    cancellation_token.cancelled().await;
+
+    info!("Shutting down tasks...");
+    task_set.shutdown().await;
+
+    info!("Acorn Alarms Service stopped");
     Ok(())
 }
