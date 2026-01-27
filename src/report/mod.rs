@@ -20,9 +20,14 @@ const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adk
 const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
 const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
-fn handle_pubsub_err<P>(err: PubSubError) -> Option<P> {
-    error!("{:?}", err);
-    None
+fn handle_publish(result: Result<(), PubSubError>) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(err) => {
+            error!("{err:?}");
+            false
+        }
+    }
 }
 
 fn get_publisher<P: Publisher>(
@@ -30,13 +35,13 @@ fn get_publisher<P: Publisher>(
     default_host: &str,
     topic_env_var: &str,
     default_topic: &str,
-) -> Option<P> {
+) -> P {
     let host = env_var::get(host_env_var).or(String::from(default_host));
     let topic = env_var::get(topic_env_var).or(String::from(default_topic));
-    P::new(host, topic).map_or_else(handle_pubsub_err, |publisher| Some(publisher))
+    P::new(host, topic)
 }
 
-fn get_pip_publisher<P: Publisher>() -> Option<P> {
+fn get_pip_publisher<P: Publisher>() -> P {
     get_publisher(
         PIP_II_KAFKA_HOST,
         DEFAULT_PIP_II_HOST,
@@ -45,7 +50,7 @@ fn get_pip_publisher<P: Publisher>() -> Option<P> {
     )
 }
 
-fn get_controls_publisher<P: Publisher>() -> Option<P> {
+fn get_controls_publisher<P: Publisher>() -> P {
     get_publisher(
         CONTROLS_KAFKA_HOST,
         DEFAULT_CONTROLS_HOST,
@@ -55,9 +60,9 @@ fn get_controls_publisher<P: Publisher>() -> Option<P> {
 }
 
 pub struct AlarmsReporter<P: Publisher> {
-    controls_publisher: Option<P>,
+    controls_publisher: P,
     known_alarms: HashSet<u32>,
-    pip2_publisher: Option<P>,
+    pip2_publisher: P,
 }
 impl<P: Publisher> AlarmsReporter<P> {
     pub fn new() -> Self {
@@ -114,44 +119,14 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn try_publish(&mut self, message: Message) -> bool {
-        let controls_published = Self::transmit_with_fallback(
-            &mut self.controls_publisher,
-            message.clone(),
-            get_controls_publisher,
-        );
-        let pip_published =
-            Self::transmit_with_fallback(&mut self.pip2_publisher, message, get_pip_publisher);
+        let controls_published =
+            handle_publish(self.controls_publisher.publish(message.clone())) == true;
+        let pip_published = handle_publish(self.pip2_publisher.publish(message)) == true;
 
         // Breaking it out into temp variables ensures both services are tried.
         // Publishing to PIP would be skipped if the calls to transmit_with_fallback were combined
         // into one statement and the call to controls failed.
         controls_published && pip_published
-    }
-
-    fn transmit_with_fallback<F: Fn() -> Option<P>>(
-        publisher_opt: &mut Option<P>,
-        message: Message,
-        fallback: F,
-    ) -> bool {
-        match publisher_opt {
-            Some(publisher) => match publisher.publish(message) {
-                Err(err) => {
-                    *publisher_opt = handle_pubsub_err(err);
-                    false
-                }
-                _ => true,
-            },
-            None => match fallback() {
-                Some(mut publisher) => match publisher.publish(message) {
-                    Ok(()) => {
-                        *publisher_opt = Some(publisher);
-                        true
-                    }
-                    Err(_) => false,
-                },
-                None => false,
-            },
-        }
     }
 }
 
@@ -163,14 +138,7 @@ mod tests {
     #[test]
     fn call_alarms_reporter_new_with_kafka_publisher() {
         let result = AlarmsReporter::<KafkaPublisher>::new();
-        match result.controls_publisher {
-            Some(_) => panic!("A publisher was created where one should not have been possible."),
-            _ => (),
-        };
-        match result.pip2_publisher {
-            Some(_) => panic!("A publisher was created where one should not have been possible."),
-            _ => (),
-        };
+        assert_eq!(HashSet::new(), result.known_alarms);
     }
 
     #[derive(Debug)]
@@ -180,7 +148,7 @@ mod tests {
     }
     impl TestPub {
         fn init() -> Self {
-            Self::new(String::default(), String::default()).unwrap()
+            Self::new(String::default(), String::default())
         }
 
         fn init_throwing() -> Self {
@@ -191,11 +159,11 @@ mod tests {
         }
     }
     impl Publisher for TestPub {
-        fn new(_host: String, _topic: String) -> Result<Self, PubSubError> {
-            Ok(Self {
+        fn new(_host: String, _topic: String) -> Self {
+            Self {
                 latest: None,
                 throw_err: false,
-            })
+            }
         }
 
         fn publish(&mut self, message: Message) -> Result<(), PubSubError> {
@@ -211,9 +179,9 @@ mod tests {
     #[test]
     fn report_new_alarm() {
         let mut test_reporter = AlarmsReporter {
-            controls_publisher: Some(TestPub::init()),
+            controls_publisher: TestPub::init(),
             known_alarms: HashSet::new(),
-            pip2_publisher: Some(TestPub::init()),
+            pip2_publisher: TestPub::init(),
         };
 
         let cur_time = Utc::now();
@@ -227,81 +195,38 @@ mod tests {
 
         assert!(test_reporter.known_alarms.contains(&0));
 
-        let prev_alarm;
-        if let Some(val) = test_reporter
-            .controls_publisher
-            .as_ref()
-            .unwrap()
-            .latest
-            .as_ref()
-        {
-            assert_eq!(val.key, Some(String::from("state:0")));
-            if let Some(pip2_val) = test_reporter
-                .pip2_publisher
-                .as_ref()
-                .unwrap()
-                .latest
-                .as_ref()
-            {
-                assert_eq!(pip2_val.key, val.key);
-                assert_eq!(pip2_val.value, val.value);
-                prev_alarm = Message {
-                    key: val.key.clone(),
-                    value: val.value.clone(),
-                };
-            } else {
-                panic!(
-                    "Expected a message to have been sent to the PIP-II publisher, but none was found"
-                )
-            }
-        } else {
-            panic!(
-                "Expected a message to have been sent to the Controls publisher, but none was found"
-            );
-        }
+        let controls_val = test_reporter.controls_publisher.latest.clone().unwrap();
+        assert_eq!(controls_val.key, Some(String::from("state:0")));
+        let pip_val = test_reporter.pip2_publisher.latest.clone().unwrap();
+        assert_eq!(pip_val.key, controls_val.key);
+        assert_eq!(pip_val.value, controls_val.value);
+
+        let prev_alarm = Message {
+            key: pip_val.key.clone(),
+            value: pip_val.value.clone(),
+        };
 
         test_reporter.report(0, Utc::now(), true);
 
         assert!(test_reporter.known_alarms.contains(&0));
 
-        if let Some(new_val) = test_reporter
-            .controls_publisher
-            .as_ref()
-            .unwrap()
-            .latest
-            .as_ref()
-        {
-            assert_eq!(new_val.key, Some(String::from("state:0")));
-            if let Some(new_pip2_val) = test_reporter
-                .pip2_publisher
-                .as_ref()
-                .unwrap()
-                .latest
-                .as_ref()
-            {
-                assert_eq!(new_pip2_val.key, new_val.key);
-                assert_eq!(new_pip2_val.value, new_val.value);
+        let controls_val = test_reporter.controls_publisher.latest.unwrap();
+        assert_eq!(controls_val.key, Some(String::from("state:0")));
 
-                assert_eq!(prev_alarm.key, new_val.key);
-                assert_eq!(prev_alarm.value, new_val.value);
-            } else {
-                panic!(
-                    "Expected a message to have been sent to the PIP-II publisher, but none was found"
-                )
-            }
-        } else {
-            panic!(
-                "Expected a message to have been sent to the Controls publisher, but none was found"
-            );
-        }
+        let pip_val = test_reporter.pip2_publisher.latest.unwrap();
+        assert_eq!(pip_val.key, controls_val.key);
+        assert_eq!(pip_val.value, controls_val.value);
+
+        assert_eq!(prev_alarm.key, pip_val.key);
+        assert_eq!(prev_alarm.value, pip_val.value);
     }
 
     #[test]
     fn report_alarm_not_active() {
         let mut test_reporter = AlarmsReporter {
-            controls_publisher: Some(TestPub::init()),
+            controls_publisher: TestPub::init(),
             known_alarms: HashSet::new(),
-            pip2_publisher: Some(TestPub::init()),
+            pip2_publisher: TestPub::init(),
         };
 
         test_reporter.known_alarms.insert(0);
@@ -312,48 +237,33 @@ mod tests {
             test_reporter.known_alarms.is_empty(),
             "The test index was not removed from the set of known alarms, when it should have been"
         );
-        if let Some(_) = test_reporter.controls_publisher.as_ref().unwrap().latest {
-            if let None = test_reporter.pip2_publisher.as_ref().unwrap().latest {
-                panic!(
-                    "A message regarding the alarm going back into range should have been sent to PIP-II, but was not"
-                );
-            }
-        } else {
-            panic!(
-                "A message regarding the alarm going back into range should have been sent, but was not"
-            );
-        }
+        assert!(test_reporter.controls_publisher.latest.is_some());
+        assert!(test_reporter.pip2_publisher.latest.is_some());
     }
 
     #[test]
     fn handles_err_on_pub() {
         let mut test_reporter = AlarmsReporter {
-            controls_publisher: Some(TestPub::init_throwing()),
+            controls_publisher: TestPub::init_throwing(),
             known_alarms: HashSet::new(),
-            pip2_publisher: Some(TestPub::init()),
+            pip2_publisher: TestPub::init(),
         };
 
         test_reporter.report(0, Utc::now(), true);
         assert!(!test_reporter.known_alarms.contains(&0));
-        if let None = test_reporter.pip2_publisher.as_ref().unwrap().latest {
-            panic!("An error to one service should still report to the other");
-        }
-        if let Some(_) = test_reporter.controls_publisher {
-            panic!("Controls publisher was not dropped after error")
-        }
+        assert!(test_reporter.controls_publisher.latest.is_none());
+        assert!(test_reporter.pip2_publisher.latest.is_some());
 
-        // Make call again. As test_reporter is using type TestPub for its generic fields,
-        // the get_publisher function in this module will call the ::new method of TestPub. This means
-        // we should see a fresh instance of TestPub spun up on this second call.
+        test_reporter.controls_publisher = TestPub::init();
         test_reporter.report(0, Utc::now(), true);
         assert!(test_reporter.known_alarms.contains(&0));
     }
     #[test]
     fn handles_subset_of_devices_independently() {
         let mut test_reporter = AlarmsReporter {
-            controls_publisher: Some(TestPub::init()),
+            controls_publisher: TestPub::init(),
             known_alarms: HashSet::new(),
-            pip2_publisher: Some(TestPub::init()),
+            pip2_publisher: TestPub::init(),
         };
 
         let cur_time = Utc::now();
