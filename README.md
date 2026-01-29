@@ -39,13 +39,13 @@ The following environment variables may be set to configure the associated syste
 
 ### Device/Kafka Alarm States
 
-| Kafka       | Device  | ACORN          | Description
-|-------------|---------|----------------|------------
-| `OK`        | `OK`    | `OK`           | There is not an alarm
-| `ALARM`     | `ALARM` | `ALARMED`      | There is an alarm
-| `---`       | `---`   | `BYPASSED`     | There may be an alarm but we are ignoring it
-| `ALARM_ACK` | `ALARM` | `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
-| `ALARM`     | `OK`    | `LATCHED`      | There was an alarm but no user acknowledged it
+| ACORN          | Description
+|----------------|------------
+| `OK`           | There is not an alarm
+| `ALARMED`      | There is an alarm
+| `BYPASSED`     | There may be an alarm but we are ignoring it
+| `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
+| `LATCHED`      | There was an alarm but no user acknowledged it
 
 - Device is source of truth for alarm (ACNET and EPICS)
 - Device is source of truth for bypass (ACNET)
@@ -80,10 +80,33 @@ stateDiagram-v2
   style ACKNOWLEDGED  fill:#FFF0F0
 ```
 
-### Alarm Lists
+### Kafka Schema
+
+A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall only record the most recent state of a given device's alarms.
+
+The Key for a record shall be the device name and alarm type suffix, and the payload shall be a JSON string.
+
+#### Alarm Type Suffixes for Keys
+
+| Suffix | Alarm Type
+|--------|-----------
+| $A     | ACNET analog
+| $D     | ACNET digital
+| $E     | EPICS any
+
+#### JSON Schema for Values
+```
+{
+  "type"  : "analog" | "digital" | "epics"    //  redundant - must match key
+  "state" : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
+  "time"  : <uint64 nanos since epoch 1/1/70>
+  "user"  : <name of user who changed state>  //  optional
+  "prev"  : <previous state per "state" values>
+}
+```
 
 ### User Actions
 
 - Acknowledge Alarm
 - Bypass/Unbypass Alarm
-- Add/Edit/Remove Alarm List
+- Manage Alarm List(s)
