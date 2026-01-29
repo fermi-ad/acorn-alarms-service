@@ -15,6 +15,15 @@ The following environment variables may be set to configure the associated syste
 - `PIP_II_ALARMS_TOPIC` -> Configures the name of the topic in the PIP-II Kafka instance that alarms will be published to
 - `PIP_II_KAFKA_HOST` -> Configures the address of the PIP-II Kafka instance
 
+## Development
+
+The following packages must be present on the host machine when building this application:
+- `cmake`
+- `libcurl4-openssl-dev`
+- `librdkafka-dev`
+- `libsasl2-dev`
+- `zlib`
+
 ## Design
 
 ### Startup
