@@ -73,6 +73,7 @@ stateDiagram-v2
 
   LATCHED --> BYPASSED: Bypass
   LATCHED --> OK: Acknowledge
+  LATCHED --> ALARMED: Device alarm
 
   style OK            fill:#F0FFF0
   style LATCHED       fill:#F0FFF0
@@ -102,7 +103,6 @@ The Key for a record shall be the device name and alarm type suffix, and the pay
   "state" : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
   "time"  : <uint64 nanos since epoch 1/1/70>
   "user"  : <name of user who changed state>    //  optional
-  "prev"  : <previous state per "state" values>
   "wake"  : <uint64 nanos since epoch 1/1/70>   //  optional
 }
 ```
