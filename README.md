@@ -82,7 +82,9 @@ stateDiagram-v2
 
 ### Kafka Schema
 
-A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall only record the most recent state of a given device's alarms.
+A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall record the most recent state of an alarm for a given device.
+
+Note that for ACNET devices, distinct records shall exist for analog and digital alarms, since both can be active at the same time.  EPICS devices can only have a single alarm active at a time, although they have a variety of potential alarm types.
 
 The Key for a record shall be the device name and alarm type suffix, and the payload shall be a JSON string.
 
@@ -97,12 +99,21 @@ The Key for a record shall be the device name and alarm type suffix, and the pay
 #### JSON Schema for Values
 ```
 {
-  "type"  : "analog" | "digital" | "epics"    //  redundant - must match key
   "state" : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
   "time"  : <uint64 nanos since epoch 1/1/70>
-  "user"  : <name of user who changed state>  //  optional
+  "user"  : <name of user who changed state>    //  optional
   "prev"  : <previous state per "state" values>
+  "wake"  : <uint64 nanos since epoch 1/1/70>   //  optional
 }
+```
+
+#### Example Kafka Records
+```
+G:AMANDA$A  { "state":"acknowledged", "time":1234567890, "user":"dave", "prev":"alarmed" }
+
+PIP2IT:pHB650_CRYO_TX103:TempK$E  { "type":"epics", "state":"alarmed", "time":1234567890, "prev":"ok" }
+
+Z:ACLTST$D  { "state":"bypassed", "time":1234567890, "user":"dave", "prev":"alarmed", "wake":1234599990 }
 ```
 
 ### User Actions
