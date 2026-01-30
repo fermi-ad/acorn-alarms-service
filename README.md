@@ -83,37 +83,36 @@ stateDiagram-v2
 
 ### Kafka Schema
 
-A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall record the most recent state of an alarm for a given device.
+A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall record the most recent state of alarms for a given device.
 
-Note that for ACNET devices, distinct records shall exist for analog and digital alarms, since both can be active at the same time.  EPICS devices can only have a single alarm active at a time, although they have a variety of potential alarm types.
+The Key for a record shall be the device name, and the payload shall be a JSON string.
 
-The Key for a record shall be the device name and alarm type suffix, and the payload shall be a JSON string.
-
-#### Alarm Type Suffixes for Keys
-
-| Suffix | Alarm Type
-|--------|-----------
-| $A     | ACNET analog
-| $D     | ACNET digital
-| $E     | EPICS any
+Given the respective rules of operation for ACNET and EPICS:
+- An ACNET device record shall only have either a single "analog" element and/or a single "digital" element.
+- An EPICS device record shall only have a single "epics" element.
 
 #### JSON Schema for Values
 ```
 {
-  "state" : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
-  "time"  : <uint64 nanos since epoch 1/1/70>
-  "user"  : <name of user who changed state>    //  optional
-  "wake"  : <uint64 nanos since epoch 1/1/70>   //  optional
+  "analog"  : { <JSON> }  //  ACNET analog alarm (can also have digital)
+  "digital" : { <JSON> }  //  ACNET digital alarm (can also have analog)
+  "epics"   : { <JSON> }  //  EPICS alarm (type specified by "type" below)(aka EPICS 'status')
+  "state"   : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
+  "time"    : <uint64 nanos since epoch 1/1/70>
+  "type"    : "hihi" | "high" | "low" | "lolo" | ...  //  optional see EPICS alarm status definitions
+  "user"    : <name of user who changed state>        //  optional
+  "wake"    : <uint64 nanos since epoch 1/1/70>       //  optional
 }
 ```
+[EPICS alarm status definitions]( https://docs.epics-controls.org/projects/base/en/7.0.10/alarm_h.html)
 
 #### Example Kafka Records
 ```
-G:AMANDA$A  { "state":"acknowledged", "time":1234567890, "user":"dave", "prev":"alarmed" }
+G:AMANDA  { "analog":{ "state":"acknowledged", "time":1234567890, "user":"dave" }, "digital":{ "state":"alarmed", "time":1234500000 }}
 
-PIP2IT:pHB650_CRYO_TX103:TempK$E  { "type":"epics", "state":"alarmed", "time":1234567890, "prev":"ok" }
+PIP2IT:pHB650_CRYO_TX103:TempK  { "epics":{ "state":"alarmed", "time":1234567890, "type": "hihi" }}
 
-Z:ACLTST$D  { "state":"bypassed", "time":1234567890, "user":"dave", "prev":"alarmed", "wake":1234599990 }
+Z:ACLTST  { "digital":{ "state":"bypassed", "time":1234567890, "user":"dave", "wake":1234599999 }}
 ```
 
 ### User Actions
