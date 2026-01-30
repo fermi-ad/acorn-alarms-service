@@ -115,7 +115,19 @@ PIP2IT:pHB650_CRYO_TX103:TempK  { "epics":{ "state":"alarmed", "time":1234567890
 Z:ACLTST  { "digital":{ "state":"bypassed", "time":1234567890, "user":"dave", "wake":1234599999 }}
 ```
 
-### User Actions
+### Alarm Configuration Info (Device DB)
+
+There is information describing an alarm that is useful to users, but does not change frequently and is not part of a state transition message, but can be read from the respective Device DB's.  These data include:
+  - Alarm Description
+  - Guidance Message
+  - Severity (ACNET)
+  - Latchable (Acknowledgeable)
+
+This information can change, but likely only infrequently.  A feasible update strategy for this information might be to query the Device DB for config data about an alarm whever a state change for that alarm is processed, with some throttle to prevent updates being too frequent (perhaps minimum 10 seconds between updates per device).
+
+### Public Interface (GraphQL)
+
+#### User Actions
 
 - Acknowledge Alarm
 - Bypass/Unbypass Alarm
