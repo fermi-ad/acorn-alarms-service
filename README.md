@@ -48,13 +48,13 @@ The following packages must be present on the host machine when building this ap
 
 ### Device/Kafka Alarm States
 
-| Kafka       | Device  | ACORN          | Description
-|-------------|---------|----------------|------------
-| `OK`        | `OK`    | `OK`           | There is not an alarm
-| `ALARM`     | `ALARM` | `ALARMED`      | There is an alarm
-| `---`       | `---`   | `BYPASSED`     | There may be an alarm but we are ignoring it
-| `ALARM_ACK` | `ALARM` | `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
-| `ALARM`     | `OK`    | `LATCHED`      | There was an alarm but no user acknowledged it
+| State          | Description
+|----------------|------------
+| `OK`           | There is not an alarm
+| `ALARMED`      | There is an alarm
+| `BYPASSED`     | There may be an alarm but we are ignoring it
+| `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
+| `LATCHED`      | There was an alarm but no user acknowledged it
 
 - Device is source of truth for alarm (ACNET and EPICS)
 - Device is source of truth for bypass (ACNET)
@@ -82,6 +82,7 @@ stateDiagram-v2
 
   LATCHED --> BYPASSED: Bypass
   LATCHED --> OK: Acknowledge
+  LATCHED --> ALARMED: Device alarm
 
   style OK            fill:#F0FFF0
   style LATCHED       fill:#F0FFF0
@@ -89,10 +90,53 @@ stateDiagram-v2
   style ACKNOWLEDGED  fill:#FFF0F0
 ```
 
-### Alarm Lists
+### Kafka Schema
 
-### User Actions
+A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall record the most recent state of alarms for a given device.
+
+The Key for a record shall be the device name, and the payload shall be a JSON string.
+
+Given the respective rules of operation for ACNET and EPICS:
+- An ACNET device record shall only have either a single "analog" element and/or a single "digital" element.
+- An EPICS device record shall only have a single "epics" element.
+
+#### JSON Schema for Values
+```
+{
+  "analog"  : { <JSON> }  //  ACNET analog alarm (can also have digital)
+  "digital" : { <JSON> }  //  ACNET digital alarm (can also have analog)
+  "epics"   : { <JSON> }  //  EPICS alarm (type specified by "type" below)(aka EPICS 'status')
+  "state"   : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
+  "time"    : { "seconds":<int64>, "nanos":<int32> }  //  per gRPC Timestamp
+  "type"    : "hihi" | "high" | "low" | "lolo" | ...  //  optional see EPICS alarm status definitions
+  "user"    : <name of user who changed state>        //  optional
+  "wake"    : { "seconds":<int64>, "nanos":<int32> }  //  optional
+}
+```
+[EPICS alarm status definitions]( https://docs.epics-controls.org/projects/base/en/7.0.10/alarm_h.html)
+
+#### Example Kafka Records
+
+| Key | Value
+|-----|------
+| G:AMANDA | { "analog" : {<br>&emsp;&emsp;"state" : "acknowledged",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave"<br>&emsp;},<br>&nbsp;&nbsp;&nbsp;"digital" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
+| PIP2IT:pHB650_CRYO_TX103:TempK | { "epics" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"type" : "hihi"<br>}&nbsp;&nbsp;}
+| Z:ACLTST | { "digital" : {<br>&emsp;&emsp;"state":"bypassed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave",<br>&emsp;&emsp;"wake" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
+
+### Alarm Configuration Info (Device DB)
+
+There is information describing an alarm that is useful to users, but does not change frequently and is not part of a state transition message, but can be read from the respective Device DB's.  These data include:
+  - Alarm Description
+  - Guidance Message
+  - Severity (ACNET)
+  - Latchable (Acknowledgeable)
+
+This information can change, but likely only infrequently.  A feasible update strategy for this information might be to query the Device DB for config data about an alarm whever a state change for that alarm is processed, with some throttle to prevent updates being too frequent (perhaps minimum 10 seconds between updates per device).
+
+### Public Interface (GraphQL)
+
+#### User Actions
 
 - Acknowledge Alarm
 - Bypass/Unbypass Alarm
-- Add/Edit/Remove Alarm List
+- Manage Alarm List(s)
