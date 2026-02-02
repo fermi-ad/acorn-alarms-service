@@ -39,7 +39,7 @@ The following environment variables may be set to configure the associated syste
 
 ### Device/Kafka Alarm States
 
-| ACORN          | Description
+| State          | Description
 |----------------|------------
 | `OK`           | There is not an alarm
 | `ALARMED`      | There is an alarm
@@ -98,22 +98,21 @@ Given the respective rules of operation for ACNET and EPICS:
   "digital" : { <JSON> }  //  ACNET digital alarm (can also have analog)
   "epics"   : { <JSON> }  //  EPICS alarm (type specified by "type" below)(aka EPICS 'status')
   "state"   : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
-  "time"    : <uint64 nanos since epoch 1/1/70>
+  "time"    : { "seconds":<int64>, "nanos":<int32> }  //  per gRPC Timestamp
   "type"    : "hihi" | "high" | "low" | "lolo" | ...  //  optional see EPICS alarm status definitions
   "user"    : <name of user who changed state>        //  optional
-  "wake"    : <uint64 nanos since epoch 1/1/70>       //  optional
+  "wake"    : { "seconds":<int64>, "nanos":<int32> }  //  optional
 }
 ```
 [EPICS alarm status definitions]( https://docs.epics-controls.org/projects/base/en/7.0.10/alarm_h.html)
 
 #### Example Kafka Records
-```
-G:AMANDA  { "analog":{ "state":"acknowledged", "time":1234567890, "user":"dave" }, "digital":{ "state":"alarmed", "time":1234500000 }}
 
-PIP2IT:pHB650_CRYO_TX103:TempK  { "epics":{ "state":"alarmed", "time":1234567890, "type": "hihi" }}
-
-Z:ACLTST  { "digital":{ "state":"bypassed", "time":1234567890, "user":"dave", "wake":1234599999 }}
-```
+| Key | Value
+|-----|------
+| G:AMANDA | { "analog" : {<br>&emsp;&emsp;"state" : "acknowledged",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave"<br>&emsp;},<br>&nbsp;&nbsp;&nbsp;"digital" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
+| PIP2IT:pHB650_CRYO_TX103:TempK | { "epics" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"type" : "hihi"<br>}&nbsp;&nbsp;}
+| Z:ACLTST | { "digital" : {<br>&emsp;&emsp;"state":"bypassed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave",<br>&emsp;&emsp;"wake" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
 
 ### Alarm Configuration Info (Device DB)
 
