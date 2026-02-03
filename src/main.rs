@@ -28,9 +28,13 @@ const DEFAULT_DEV_DB_ADDR: &str = "http://localhost:6802";
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 
+const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
+const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
+
+#[allow(dead_code)]
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
-        DpmData::DpmReading(reading) => {
+        DpmData::Reading(reading) => {
             debug!(
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
@@ -98,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut client = DevDBClient::connect(&endpoint).await?;
 
-    let names = vec![];
+    //let names = vec![];
     let names = vec![];
 
     let mut device_list: Vec<AlarmRequest> = vec![];
@@ -155,10 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
-    let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
-
-    // REMOVE THIS
-    // device_list = device_list.drain(0..10000).collect();
+    let _alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
 
     info!("Calling DPM with {} alarm blocks", device_list.len());
 
@@ -202,13 +203,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     //     return;
                                     // }
                                     match data {
-                                        DpmData::DpmReading(reading) => {
+                                        DpmData::Reading(reading) => {
                                                         debug!(
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
                                         },
-                                        DpmData::DpmStatus(_) =>{},
+                                        DpmData::Status(_) =>{},
                                     }
                                 }
                                 Err(e) => {
