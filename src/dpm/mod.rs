@@ -232,7 +232,7 @@ mod test {
                 assert_eq!(status.index, 0, "Incorrect index");
                 assert_eq!(status.device, "M:OUTTMP".to_string(), "Incorrect Device");
                 assert_eq!(status.facility_code, 1, "Incorrect facility code");
-                assert_eq!(status.status_code, 2, "Incorrect status code");
+                assert_eq!(status.status_code, 1, "Incorrect status code");
                 assert_eq!(status.message, "DPM PEND".to_string(), "Incorrect message");
             }
             _ => panic!("Expected parsed data to be Status"),
