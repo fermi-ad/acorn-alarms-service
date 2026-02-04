@@ -31,7 +31,6 @@ const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
 const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
 
-#[allow(dead_code)]
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
         DpmData::Reading(reading) => {
@@ -102,8 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut client = DevDBClient::connect(&endpoint).await?;
 
-    //let names = vec![];
-    let names = vec![];
+    let names = vec!["G:AMANDA".to_string()];
 
     let mut device_list: Vec<AlarmRequest> = vec![];
 
@@ -125,7 +123,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match a.alarm_type {
                     crate::dpm::AlarmType::Analog => analog_count += 1,
                     crate::dpm::AlarmType::Digital => digital_count += 1,
-                    //new
                     crate::dpm::AlarmType::Value => {}
                 }
             }
@@ -159,7 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- DPM (DAQ) test ---
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
-    let _alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
+    let alarms_reporter = std::sync::Arc::new(tokio::sync::Mutex::new(AlarmsReporter::<
+        KafkaPublisher,
+    >::new()));
 
     info!("Calling DPM with {} alarm blocks", device_list.len());
 
@@ -177,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let batch = chunk.to_vec();
         let endpoint = dpm_endpoint.clone();
         let cancel_token = cancellation_token.clone();
+        let alarms_reporter = alarms_reporter.clone();
 
         // spawn tasks for each chunk
         task_set.spawn(async move {
@@ -186,31 +186,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 info!("Attempting connection for batch of {}", batch.len());
-                let result = dpm::fetch_alarms(
-                    endpoint.clone(),
-                    batch.clone(),
-                    cancel_token.clone(),
-                )
-                .await;
+                let result =
+                    dpm::fetch_alarms(endpoint.clone(), batch.clone(), cancel_token.clone()).await;
 
                 match result {
                     Ok(mut stream) => {
                         while let Some(item) = stream.next().await {
                             match item {
                                 Ok(data) => {
-                                    // if sender.send(data).await.is_err() {
-                                    //     error!("Reporter channel closed. Exiting task.");
-                                    //     return;
-                                    // }
-                                    match data {
-                                        DpmData::Reading(reading) => {
-                                                        debug!(
-                "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
-                reading.device, reading.alarm_type, reading.timestamp, reading.data
-            );
-                                        },
-                                        DpmData::Status(_) =>{},
-                                    }
+                                    let mut reporter = alarms_reporter.lock().await;
+                                    handle_daq_data(data, &mut reporter);
                                 }
                                 Err(e) => {
                                     error!("Stream decoding error: {}. Retrying...", e);
