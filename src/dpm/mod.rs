@@ -100,8 +100,7 @@ pub async fn fetch_alarms(
     let parsed_stream = stream_inner.take_until(async move {
         cancel_signal.cancelled().await;
     }).map(move |res| match res {
-        
-                        Ok(reply) => {
+                Ok(reply) => {
                     tracing::debug!("Received reply from DAQ stream");
                     let device = device_list.get(reply.index as usize).unwrap();
                     parse_reply(&reply, device)
