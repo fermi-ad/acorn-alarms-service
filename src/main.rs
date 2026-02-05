@@ -6,7 +6,7 @@ mod dpm;
 use dpm::DpmData;
 
 mod proto;
-use devdb_client::DevDBClient;
+use proto::services::devdb::dev_db_client::DevDbClient;
 use proto::common::device::value::Value;
 use proto::services::ioc_alarms::ioc_alarms_client::IocAlarmsClient;
 
@@ -30,6 +30,9 @@ const DEFAULT_DPM_ADDR: &str = "http://localhost:50051";
 
 const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
 const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
+
+const DPM_CHUNK_SIZE: &str = "DPM_CHUNK_SIZE";
+const DEFAULT_DPM_CHUNK_SIZE: usize = 100;
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
@@ -99,44 +102,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
 
-    let mut client = DevDBClient::connect(&endpoint).await?;
+    let mut client = DevDbClient::connect(endpoint.to_string()).await?;
 
     let names = vec!["G:AMANDA".to_string()];
 
     let mut device_list: Vec<AlarmRequest> = vec![];
 
-    match client.get_all_alarm_info(names).await {
-        Ok(alarms) => {
-            device_list = alarms;
-            // total alarm blocks (1 AlarmRequest == 1 alarm block == 1 DRF sent later)
-            let total_blocks = device_list.len();
+    match devdb_client::get_alarm_info(&mut client, names).await {
+    Ok(alarms) => {
+        device_list = alarms;
 
-            // unique device names
-            use std::collections::HashSet;
-            let unique_devices: HashSet<String> =
-                device_list.iter().map(|a| a.device.clone()).collect();
+        // total alarm blocks (1 AlarmRequest == 1 alarm block)
+        let total_blocks = device_list.len();
 
-            // counts by alarm type
-            let mut analog_count = 0usize;
-            let mut digital_count = 0usize;
-            for a in &device_list {
-                match a.alarm_type {
-                    crate::dpm::AlarmType::Analog => analog_count += 1,
-                    crate::dpm::AlarmType::Digital => digital_count += 1,
-                    crate::dpm::AlarmType::Value => {}
-                }
+        // unique device names
+        use std::collections::HashSet;
+        let unique_devices: HashSet<String> =
+            device_list.iter().map(|a| a.device.clone()).collect();
+
+        // counts by alarm type
+        let mut analog_count = 0usize;
+        let mut digital_count = 0usize;
+
+        for a in &device_list {
+            match a.alarm_type {
+                crate::dpm::AlarmType::Analog => analog_count += 1,
+                crate::dpm::AlarmType::Digital => digital_count += 1,
+                crate::dpm::AlarmType::Value => {}
             }
-
-            info!(
-                "DevDB -> total alarm blocks: {}, unique devices: {}, analog blocks: {}, digital blocks: {}",
-                total_blocks,
-                unique_devices.len(),
-                analog_count,
-                digital_count
-            );
         }
-        Err(e) => error!(" DevDB error: {e:?}"),
+
+        info!(
+            "DevDB -> total alarm blocks: {}, unique devices: {}, analog blocks: {}, digital blocks: {}",
+            total_blocks,
+            unique_devices.len(),
+            analog_count,
+            digital_count
+        );
     }
+    Err(e) => error!("DevDB error: {:?}", e),
+}
+
 
     //  connect and query EPICS Device DB
     let epics_endpoint =
@@ -163,7 +169,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Calling DPM with {} alarm blocks", device_list.len());
 
     // chunk up device list
-    let chunk_size = 500;
+    let chunk_size: usize = env_var::get(DPM_CHUNK_SIZE)
+        .or(DEFAULT_DPM_CHUNK_SIZE.to_string())
+        .parse()
+        .unwrap_or(DEFAULT_DPM_CHUNK_SIZE);
+    info!("Using DPM chunk size = {}", chunk_size);
     info!(
         "Total batches: {}, batch size: {}",
         device_list.len() / chunk_size + 1,
