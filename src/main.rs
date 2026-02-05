@@ -6,8 +6,8 @@ mod dpm;
 use dpm::DpmData;
 
 mod proto;
-use proto::services::devdb::dev_db_client::DevDbClient;
 use proto::common::device::value::Value;
+use proto::services::devdb::dev_db_client::DevDbClient;
 use proto::services::ioc_alarms::ioc_alarms_client::IocAlarmsClient;
 
 mod report;
@@ -109,40 +109,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut device_list: Vec<AlarmRequest> = vec![];
 
     match devdb_client::get_alarm_info(&mut client, names).await {
-    Ok(alarms) => {
-        device_list = alarms;
+        Ok(alarms) => {
+            device_list = alarms;
 
-        // total alarm blocks (1 AlarmRequest == 1 alarm block)
-        let total_blocks = device_list.len();
+            // total alarm blocks (1 AlarmRequest == 1 alarm block)
+            let total_blocks = device_list.len();
 
-        // unique device names
-        use std::collections::HashSet;
-        let unique_devices: HashSet<String> =
-            device_list.iter().map(|a| a.device.clone()).collect();
+            // unique device names
+            use std::collections::HashSet;
+            let unique_devices: HashSet<String> =
+                device_list.iter().map(|a| a.device.clone()).collect();
 
-        // counts by alarm type
-        let mut analog_count = 0usize;
-        let mut digital_count = 0usize;
+            // counts by alarm type
+            let mut analog_count = 0usize;
+            let mut digital_count = 0usize;
 
-        for a in &device_list {
-            match a.alarm_type {
-                crate::dpm::AlarmType::Analog => analog_count += 1,
-                crate::dpm::AlarmType::Digital => digital_count += 1,
-                crate::dpm::AlarmType::Value => {}
+            for a in &device_list {
+                match a.alarm_type {
+                    crate::dpm::AlarmType::Analog => analog_count += 1,
+                    crate::dpm::AlarmType::Digital => digital_count += 1,
+                    crate::dpm::AlarmType::Value => {}
+                }
             }
+
+            info!(
+                "DevDB -> total alarm blocks: {}, unique devices: {}, analog blocks: {}, digital blocks: {}",
+                total_blocks,
+                unique_devices.len(),
+                analog_count,
+                digital_count
+            );
         }
-
-        info!(
-            "DevDB -> total alarm blocks: {}, unique devices: {}, analog blocks: {}, digital blocks: {}",
-            total_blocks,
-            unique_devices.len(),
-            analog_count,
-            digital_count
-        );
+        Err(e) => error!("DevDB error: {:?}", e),
     }
-    Err(e) => error!("DevDB error: {:?}", e),
-}
-
 
     //  connect and query EPICS Device DB
     let epics_endpoint =
