@@ -1,34 +1,84 @@
 mod devdb_client;
-mod epics;
-mod epics_device_db;
-
 mod dpm;
-use dpm::DpmData;
-
+use dpm::{DpmData, DpmReading};
+mod epics_device_db;
 mod proto;
-use proto::common::device::value::Value;
-use proto::services::{
-    devdb::dev_db_client::DevDbClient, ioc_alarms::ioc_alarms_client::IocAlarmsClient,
+use proto::{
+    common::{
+        alarm::{
+            Status,
+            status::{Severity, Source, State},
+        },
+        device::value::Value,
+    },
+    google::protobuf::Timestamp,
+    services::{devdb::dev_db_client::DevDbClient, ioc_alarms::ioc_alarms_client::IocAlarmsClient},
 };
-
 mod report;
 use report::AlarmsReporter;
-
+use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Publisher, kafka_impl::KafkaPublisher};
 use tokio_stream::StreamExt;
-
-use rust_env_var_lib::env_var;
-
 use tracing::{Level, error, info};
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
-const DEFAULT_DEV_DB_ADDR: &str = "http://10.200.24.105:6802";
+const DEFAULT_DEV_DB_ADDR: &str = "https://grpc-devdb.controls-appdev.svc.adkube.fnal.gov:6802";
 
 const EPICS_DEV_DB_ADDR: &str = "EPICS_DEV_DB_ADDR";
-const DEFAULT_EPICS_DEV_DB_ADDR: &str = "http://10.200.24.128:6802";
+const DEFAULT_EPICS_DEV_DB_ADDR: &str =
+    "https://grpc-ioc-alarms.controls-appdev.svc.adkube.fnal.gov:6802";
 
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
+
+fn create_alarm_from_data(reading: DpmReading) -> Option<Status> {
+    let (source, state) = match reading.data {
+        Value::AnaAlarm(alrm) => {
+            let state = if !alrm.alarm_enable {
+                State::Bypassed
+            } else if alrm.alarm_status {
+                State::Alarmed
+            } else {
+                State::Ok
+            };
+            (Source::Analog, state)
+        }
+        Value::DigAlarm(alrm) => {
+            let state = if !alrm.alarm_enable {
+                State::Bypassed
+            } else if alrm.alarm_status {
+                State::Alarmed
+            } else {
+                State::Ok
+            };
+            (Source::Digital, state)
+        }
+        Value::Text(sevr) => {
+            let state = if sevr == "NO_ALARM" {
+                State::Ok
+            } else {
+                State::Alarmed
+            };
+            (Source::Epics, state)
+        }
+        _ => return None,
+    };
+
+    Some(Status {
+        device: reading.device,
+        source: source as i32,
+        state: state as i32,
+        severity: Severity::Unknown as i32,
+        acknowledgeable: false,
+        time: Some(Timestamp {
+            seconds: reading.timestamp.timestamp(),
+            nanos: reading.timestamp.timestamp_subsec_nanos() as i32,
+        }),
+        epics_type: String::default(),
+        user: String::default(),
+        wake: None,
+    })
+}
 
 fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsReporter<P>) {
     match data {
@@ -37,24 +87,8 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
                 "Reading!\ndevice: {:?}\nalarm type: {:?}\ntimestamp: {:?}\nreading: {:?}",
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
-            let mut should_report = false;
-            let active_alarm = match reading.data {
-                Value::AnaAlarm(alrm) => {
-                    should_report = true;
-                    alrm.alarm_enable && alrm.alarm_status
-                }
-                Value::DigAlarm(alrm) => {
-                    should_report = true;
-                    alrm.alarm_enable && alrm.alarm_status
-                }
-                Value::Text(sevr) => {
-                    should_report = true;
-                    sevr != "NO_ALARM"
-                }
-                _ => false,
-            };
-            if should_report {
-                alarms_reporter.report(reading.index, reading.timestamp, active_alarm);
+            if let Some(alarm) = create_alarm_from_data(reading) {
+                alarms_reporter.report(alarm);
             }
         }
         DpmData::Status(status) => {
@@ -75,6 +109,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .with_target(false)
+        .with_file(true)
+        .with_line_number(true)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
 
