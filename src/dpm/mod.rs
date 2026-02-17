@@ -1,10 +1,9 @@
+use crate::proto::{
+    common::device::value,
+    services::daq::{ReadingList, ReadingReply, daq_client::DaqClient, reading_reply},
+};
 use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
-
-use crate::proto::common::device::value;
-use crate::proto::services::daq::{
-    ReadingList, ReadingReply, daq_client::DaqClient, reading_reply,
-};
 
 #[derive(Debug)]
 pub struct DaqError {
@@ -177,6 +176,7 @@ mod test {
             },
             status::Status,
         },
+        google::protobuf::Timestamp,
         services::daq::{Reading, Readings},
     };
 
@@ -232,7 +232,7 @@ mod test {
             index: 0,
             value: Some(reading_reply::Value::Readings(Readings {
                 reading: vec![Reading {
-                    timestamp: Some(prost_types::Timestamp {
+                    timestamp: Some(Timestamp {
                         seconds: now.timestamp(),
                         nanos: now.timestamp_subsec_nanos() as i32,
                     }),
@@ -287,7 +287,7 @@ mod test {
             index: 0,
             value: Some(reading_reply::Value::Readings(Readings {
                 reading: vec![Reading {
-                    timestamp: Some(prost_types::Timestamp {
+                    timestamp: Some(Timestamp {
                         seconds: now.timestamp(),
                         nanos: now.timestamp_subsec_nanos() as i32,
                     }),

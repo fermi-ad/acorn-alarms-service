@@ -1,4 +1,8 @@
 pub mod common {
+    pub mod alarm {
+        include!(concat!(env!("OUT_DIR"), "/common.alarm.rs"));
+    }
+
     pub mod device {
         include!(concat!(env!("OUT_DIR"), "/common.device.rs"));
     }
@@ -19,6 +23,12 @@ pub mod services {
 
     pub mod ioc_alarms {
         include!(concat!(env!("OUT_DIR"), "/services.ioc_alarms.rs"));
+    }
+}
+
+pub mod google {
+    pub mod protobuf {
+        include!(concat!(env!("OUT_DIR"), "/google.protobuf.rs"));
     }
 }
 

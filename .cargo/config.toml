@@ -1,2 +1,7 @@
+[env]
+# Env vars for use in testing. Will not be used when the compiled binary is executed.
+CONTROLS_KAFKA_HOST = "some host"
+CONTROLS_ALARMS_TOPIC = "test topic"
+
 [net]
 git-fetch-with-cli = true
