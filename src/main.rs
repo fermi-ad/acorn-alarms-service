@@ -20,6 +20,8 @@ use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Publisher, kafka_impl::KafkaPublisher};
 use tokio_stream::StreamExt;
 use tracing::{Level, error, info};
+mod redis;
+use redis::start_redis_reader;
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "https://grpc-devdb.controls-appdev.svc.adkube.fnal.gov:6802";
@@ -106,6 +108,7 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
         .with_target(false)
@@ -115,6 +118,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
 
     info!("Acorn Alarms Service starting…");
+
+    tokio::spawn(async {
+    if let Err(e) = start_redis_reader().await {
+        eprintln!("Redis reader error: {:?}", e);
+    }
+});
 
     //  connect and query ACNET Device DB
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
@@ -153,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     device_list.append(&mut epics_device_list);
 
-    // --- DPM (DAQ) test ---
+    // --- DPM (DAQ) test --
     let dpm_endpoint = env_var::get(DPM_ADDR).or(String::from(DEFAULT_DPM_ADDR));
     let mut alarms_reporter = AlarmsReporter::<KafkaPublisher>::new();
     match dpm::fetch_alarms(dpm_endpoint, device_list).await {
