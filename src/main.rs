@@ -22,6 +22,9 @@ use tokio_stream::StreamExt;
 use tracing::{Level, error, info};
 mod redis_stream;
 use crate::redis_stream::start_redis_reader;
+use crate::redis_writer::write_alarm_to_redis;
+mod redis_writer;
+
 
 const DEV_DB_ADDR: &str = "DEV_DB_ADDR";
 const DEFAULT_DEV_DB_ADDR: &str = "https://grpc-devdb.controls-appdev.svc.adkube.fnal.gov:6802";
@@ -32,7 +35,6 @@ const DEFAULT_EPICS_DEV_DB_ADDR: &str =
 
 const DPM_ADDR: &str = "DPM_ADDR";
 const DEFAULT_DPM_ADDR: &str = "http://131.225.120.107:50051";
-
 
 fn create_alarm_from_data(reading: DpmReading) -> Option<Status> {
     let (source, state) = match reading.data {
@@ -91,7 +93,19 @@ fn handle_daq_data<P: Publisher>(data: DpmData, alarms_reporter: &mut AlarmsRepo
                 reading.device, reading.alarm_type, reading.timestamp, reading.data
             );
             if let Some(alarm) = create_alarm_from_data(reading) {
-                alarms_reporter.report(alarm);
+                alarms_reporter.report(alarm.clone());
+
+                let device = alarm.device.clone();
+                let source = alarm.source.to_string();
+                let severity = alarm.severity.to_string();
+                let state = alarm.state.to_string();
+
+                tokio::spawn(async move {
+                    if let Err(e) = write_alarm_to_redis(&device, &source, &severity, &state).await
+                    {
+                        eprintln!("Redis write error: {:?}", e);
+                    }
+                });
             }
         }
         DpmData::Status(status) => {
@@ -124,8 +138,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!("Redis reader error: {:?}", e);
         }
     });
-    start_redis_reader().await?;
-    //  connect and query ACNET Device DB
+
+    //  connect and query acnet devdb
     let endpoint = env_var::get(DEV_DB_ADDR).or(String::from(DEFAULT_DEV_DB_ADDR));
 
     let mut client = DevDbClient::connect(endpoint.to_string()).await?;

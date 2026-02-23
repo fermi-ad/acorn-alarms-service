@@ -1,4 +1,4 @@
-use redis::{Client, FromRedisValue, Value, streams::StreamReadReply};
+use redis::{Client, Value, streams::StreamReadReply};
 use std::{env, error::Error};
 
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
@@ -20,9 +20,9 @@ pub async fn start_redis_reader() -> Result<(), Box<dyn Error>> {
 
     let client: Client = redis::Client::open(url)?;
 
-    let mut conn = client.get_async_connection().await?;
+    let mut conn = client.get_multiplexed_async_connection().await?;
 
-    let mut last_id = "$".to_string(); // using "0-0" for replay
+    let mut last_id = "$".to_string();
 
     loop {
         let reply: Option<StreamReadReply> = redis::cmd("XREAD")
@@ -38,10 +38,10 @@ pub async fn start_redis_reader() -> Result<(), Box<dyn Error>> {
 
         for stream in reply.keys {
             for entry in stream.ids {
-                println!("Redis {} -> id={}", stream_key, entry.id);
+                tracing::info!("Redis {} -> id={}", stream_key, entry.id);
 
                 for (k, v) in entry.map.iter() {
-                    println!("  {:?} = {}", k, value_to_string(v));
+                    println!("  {} = {}", k, value_to_string(v));
                 }
 
                 last_id = entry.id.clone();
@@ -58,13 +58,9 @@ fn get_env(name: &str, default: &str) -> String {
 }
 
 fn value_to_string(v: &Value) -> String {
-    if let Ok(s) = String::from_redis_value(v) {
-        return s;
-    }
-    if let Ok(bytes) = Vec::<u8>::from_redis_value(v) {
-        return String::from_utf8_lossy(&bytes).to_string();
-    }
     match v {
+        Value::BulkString(bytes) => String::from_utf8_lossy(bytes).to_string(),
+        Value::SimpleString(s) => s.clone(),
         Value::Int(i) => i.to_string(),
         Value::Nil => "nil".to_string(),
         other => format!("{:?}", other),

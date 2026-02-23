@@ -19,6 +19,7 @@ pub async fn get_alarm_info(
     let reply: AlarmInfoReply = client.get_all_alarm_info(request).await?.into_inner();
 
     // Log how much data DevDB returned
+
     tracing::info!(
         "ACNET Device DB returned {} alarm info entries",
         reply.alarm_info.len()
@@ -36,9 +37,7 @@ pub async fn get_alarm_info(
             );
             AlarmRequest {
                 device: alarm_info.device_name.clone(),
-                // 1 -> signifies analaog alarm block
-                // 5 -> signifies digital alarm block
-                // Anything else should result in an error
+                // 1 - signifies analaog alarm block, 5 - digital block
                 alarm_type: match alarm_info.alarm_block.as_ref().unwrap().pi {
                     1 => AlarmType::Analog,
                     5 => AlarmType::Digital,
