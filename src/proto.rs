@@ -32,6 +32,7 @@ pub mod google {
     }
 }
 
+
 // NOTE:
 // This file is central module for all protobuf-generated code.
 // tonic/prost generates many .rs files in OUT_DIR, but they are not part of
