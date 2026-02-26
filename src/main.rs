@@ -1,8 +1,12 @@
 mod proto;
-use tracing::{Level, error, info};
 mod report;
 mod redis_stream;
+
+use tracing::{Level, error, info};
+use report::AlarmsReporter;
+use rust_pubsub_lib::kafka_impl::KafkaPublisher;
 use crate::redis_stream::start_redis_reader;
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,20 +23,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Acorn Alarms Service starting…");
 
-    // Redis reader background task
-    tokio::spawn(async {
+    // Shared Kafka reporter
+    let reporter = Arc::new(Mutex::new(
+        AlarmsReporter::<KafkaPublisher>::new()
+    ));
+
+    let reporter_clone = reporter.clone();
+
+    //  Redis reader background task with reporter
+    tokio::spawn(async move {
         loop {
-            if let Err(e) = start_redis_reader().await {
+            if let Err(e) = start_redis_reader(reporter_clone.clone()).await {
                 error!("Redis reader stopped: {:?}", e);
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
     });
-
-    // DevDB disabled for Redis-only runtime
-
-    // DevDB + EPICS + DPM sections intentionally disabled
-    
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;

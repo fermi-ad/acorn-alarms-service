@@ -2,13 +2,14 @@ use redis::{Value, streams::StreamReadReply};
 use std::{env, error::Error};
 use tracing::{info, warn};
 
-use crate::report::AlarmsReporter;
 use crate::proto::common::alarm::{
     Status,
     status::{Severity, Source, State},
 };
 use crate::proto::google::protobuf::Timestamp;
+use crate::report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
+use std::sync::{Arc, Mutex}; // ✅ ADDED
 
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
@@ -18,7 +19,9 @@ const DEFAULT_REDIS_HOST: &str = "127.0.0.1";
 const DEFAULT_REDIS_PORT: &str = "6379";
 const DEFAULT_STREAM_KEY: &str = "acorn:alarms";
 
-pub async fn start_redis_reader() -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn start_redis_reader(
+    reporter: Arc<Mutex<AlarmsReporter<KafkaPublisher>>>, // ✅ UPDATED SIGNATURE
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let host = get_env(ALARM_REDIS_HOST, DEFAULT_REDIS_HOST);
     let port = get_env(ALARM_REDIS_PORT, DEFAULT_REDIS_PORT);
     let stream_key = get_env(ALARM_REDIS_STREAM_KEY, DEFAULT_STREAM_KEY);
@@ -35,7 +38,7 @@ pub async fn start_redis_reader() -> Result<(), Box<dyn Error + Send + Sync>> {
     let client = redis::Client::open(url)?;
     let mut conn = client.get_multiplexed_async_connection().await?;
 
-    let mut reporter = AlarmsReporter::<KafkaPublisher>::new();
+    // ❌ REMOVED local reporter creation
 
     let mut last_id = "0-0".to_string();
 
@@ -77,49 +80,52 @@ pub async fn start_redis_reader() -> Result<(), Box<dyn Error + Send + Sync>> {
         };
 
         for stream in reply.keys {
-           for entry in stream.ids {
-    let device = map_to_string(&entry.map, "device");
-    let severity = map_to_string(&entry.map, "severity");
-    let state = map_to_string(&entry.map, "state");
-    let source = map_to_string(&entry.map, "source");
+            for entry in stream.ids {
+                let device = map_to_string(&entry.map, "device");
+                let severity = map_to_string(&entry.map, "severity");
+                let state = map_to_string(&entry.map, "state");
+                let source = map_to_string(&entry.map, "source");
 
-    info!(
-        target = "redis_stream",
-        stream = %stream_key,
-        id = %entry.id,
-        fields = ?entry.map,
-        "Received alarm from Redis stream"
-    );
+                info!(
+                    target = "redis_stream",
+                    stream = %stream_key,
+                    id = %entry.id,
+                    fields = ?entry.map,
+                    "Received alarm from Redis stream"
+                );
 
-    if device.is_none() {
-        warn!(
-            target = "redis_stream",
-            id = %entry.id,
-            "Missing required device field in Redis entry"
-        );
-        continue;
-    }
+                if device.is_none() {
+                    warn!(
+                        target = "redis_stream",
+                        id = %entry.id,
+                        "Missing required device field in Redis entry"
+                    );
+                    continue;
+                }
 
-    info!(
-        target = "redis_stream",
-        device = ?device,
-        severity = ?severity,
-        state = ?state,
-        source = ?source,
-        "Parsed alarm fields"
-    );
+                info!(
+                    target = "redis_stream",
+                    device = ?device,
+                    severity = ?severity,
+                    state = ?state,
+                    source = ?source,
+                    "Parsed alarm fields"
+                );
 
-    let status = build_status_from_redis(
-        device.clone().unwrap(),
-        severity.clone(),
-        state.clone(),
-        source.clone(),
-    );
+                let status = build_status_from_redis(
+                    device.clone().unwrap(),
+                    severity.clone(),
+                    state.clone(),
+                    source.clone(),
+                );
 
-    reporter.report(status);
+                // ✅ REPORT VIA SHARED REPORTER
+                if let Ok(mut rep) = reporter.lock() {
+                    rep.report(status);
+                }
 
-    last_id = entry.id.clone();
-}
+                last_id = entry.id.clone();
+            }
         }
     }
 }
@@ -147,23 +153,14 @@ fn build_status_from_redis(
     state: Option<String>,
     source: Option<String>,
 ) -> Status {
-    // ----- Severity mapping -----
-    let severity_enum = match severity
-        .unwrap_or_default()
-        .to_uppercase()
-        .as_str()
-    {
+    //severity mapping
+    let severity_enum = match severity.unwrap_or_default().to_uppercase().as_str() {
         "LOW" | "MINOR" => Severity::Low,
         "HIGH" | "MAJOR" => Severity::High,
         _ => Severity::Unknown,
     };
-
-    // ----- State mapping -----
-    let state_enum = match state
-        .unwrap_or_default()
-        .to_uppercase()
-        .as_str()
-    {
+    //state mapping
+    let state_enum = match state.unwrap_or_default().to_uppercase().as_str() {
         "OK" => State::Ok,
         "ALARMED" | "ALARM" => State::Alarmed,
         "BYPASSED" => State::Bypassed,
@@ -171,13 +168,8 @@ fn build_status_from_redis(
         "ACKNOWLEDGED" | "ACK" => State::Acknowledged,
         _ => State::Unknown,
     };
-
-    // ----- Source mapping -----
-    let source_enum = match source
-        .unwrap_or_default()
-        .to_uppercase()
-        .as_str()
-    {
+    // source mapping
+    let source_enum = match source.unwrap_or_default().to_uppercase().as_str() {
         "ANALOG" => Source::Analog,
         "DIGITAL" => Source::Digital,
         "EPICS" => Source::Epics,
