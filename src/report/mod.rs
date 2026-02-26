@@ -71,7 +71,10 @@ impl<P: Publisher> AlarmsReporter<P> {
 
     fn handle_publish(&mut self, message: Message) -> bool {
         match self.controls_publisher.publish(message) {
-            Ok(_) => true,
+            Ok(_) => {
+                tracing::info!(target = "kafka", "Published alarm to Kafka");
+                true
+            }
             Err(err) => {
                 error!("{err:?}");
                 false
