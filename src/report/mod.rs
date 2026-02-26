@@ -1,9 +1,11 @@
+use crate::proto::common::alarm::status::Severity;
 use crate::proto::common::alarm::{
     Status,
     status::{Source, State},
 };
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Message, Publisher};
+use serde::Serialize;
 use std::collections::HashMap;
 use tracing::error;
 
@@ -23,11 +25,104 @@ fn get_publisher<P: Publisher>() -> P {
 
 fn alarm_to_message(status: &Status, message_body: String) -> Message {
     Message {
-        key: Some(format!("{}:{:?}", status.device, status.source())),
+        key: Some(format!("{}#{}", status.device, map_source(status.source()))),
         value: message_body,
     }
 }
 
+#[derive(Serialize)]
+struct KafkaAlarmPayload {
+    #[serde(rename = "Device")]
+    device: String,
+
+    #[serde(rename = "Source")]
+    source: String,
+
+    #[serde(rename = "State")]
+    state: String,
+
+    #[serde(rename = "Severity")]
+    severity: String,
+
+    #[serde(rename = "Acknowledgeable")]
+    acknowledgeable: String,
+
+    #[serde(rename = "Time")]
+    time: Option<TimestampPayload>,
+
+    #[serde(rename = "Detail")]
+    detail: Option<u32>,
+
+    #[serde(rename = "User")]
+    user: Option<String>,
+
+    #[serde(rename = "Wake")]
+    wake: Option<TimestampPayload>,
+}
+
+#[derive(Serialize)]
+struct TimestampPayload {
+    seconds: i64,
+    nanos: i32,
+}
+fn map_source(source: Source) -> String {
+    match source {
+        Source::Analog => "Analog",
+        Source::Digital => "Digital",
+        Source::Epics => "Epics",
+        _ => "Unknown",
+    }
+    .to_string()
+}
+
+fn map_state(state: State) -> String {
+    match state {
+        State::Ok => "Ok",
+        State::Alarmed => "Alarmed",
+        State::Bypassed => "Bypassed",
+        State::Latched => "Latched",
+        State::Acknowledged => "Acknowledged",
+        _ => "Unknown",
+    }
+    .to_string()
+}
+
+fn map_severity(sev: Severity) -> String {
+    match sev {
+        Severity::Low => "Low",
+        Severity::High => "High",
+        _ => "Unknown",
+    }
+    .to_string()
+}
+
+fn build_kafka_payload(status: &Status) -> KafkaAlarmPayload {
+    KafkaAlarmPayload {
+        device: status.device.clone(),
+        source: map_source(status.source()),
+        state: map_state(status.state()),
+        severity: map_severity(status.severity()),
+        acknowledgeable: status.acknowledgeable.to_string(),
+
+        time: status.time.as_ref().map(|t| TimestampPayload {
+            seconds: t.seconds,
+            nanos: t.nanos,
+        }),
+
+        detail: None,
+
+        user: if status.user.is_empty() {
+            None
+        } else {
+            Some(status.user.clone())
+        },
+
+        wake: status.wake.as_ref().map(|t| TimestampPayload {
+            seconds: t.seconds,
+            nanos: t.nanos,
+        }),
+    }
+}
 pub struct AlarmsReporter<P: Publisher> {
     controls_publisher: P,
     known_alarms: HashMap<Source, HashMap<String, State>>,
@@ -41,7 +136,8 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     pub fn report(&mut self, alarm: Status) {
-        let serialized = serde_json::to_string(&alarm);
+        let payload = build_kafka_payload(&alarm);
+        let serialized = serde_json::to_string(&payload);
         if let Err(err) = serialized {
             error!(
                 "Failed to serialize alarm object for {}:{:?}\n{}",
@@ -53,6 +149,8 @@ impl<P: Publisher> AlarmsReporter<P> {
         }
 
         let message_body = serialized.unwrap();
+
+        tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
         let cur_state = alarm.state();
         let devices_opt = self.known_alarms.get(&alarm.source());
 
