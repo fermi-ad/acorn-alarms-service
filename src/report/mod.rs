@@ -136,32 +136,42 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     pub fn report(&mut self, alarm: Status) {
-        let payload = build_kafka_payload(&alarm);
-        let serialized = serde_json::to_string(&payload);
-        if let Err(err) = serialized {
-            error!(
-                "Failed to serialize alarm object for {}:{:?}\n{}",
-                alarm.device,
-                alarm.source(),
-                err
-            );
-            return;
-        }
+        let cur_state: State = alarm.state();
+        let devices_opt: Option<&HashMap<String, State>> = self.known_alarms.get(&alarm.source());
 
-        let message_body = serialized.unwrap();
-
-        tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
-        let cur_state = alarm.state();
-        let devices_opt = self.known_alarms.get(&alarm.source());
-
-        if devices_opt.is_none_or(|devices| {
+        if devices_opt.is_none_or(|devices: &HashMap<String, State>| {
             devices
                 .get(&alarm.device)
-                .is_none_or(|state| cur_state != *state)
+                .is_none_or(|state: &State| cur_state != *state)
         }) {
-            let message = alarm_to_message(&alarm, message_body);
+            
+            let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
+
+            let message_body = match serde_json::to_string(&payload) {
+                Ok(body) => body,
+                Err(err) => {
+                    error!(
+                        "Failed to serialize alarm object for {}:{:?}\n{}",
+                        alarm.device,
+                        alarm.source(),
+                        err
+                    );
+                    return;
+                }
+            };
+
+            tracing::info!(
+                target = "kafka",
+                payload = %message_body,
+                "Kafka payload"
+            );
+
+            let message: Message = alarm_to_message(&alarm, message_body);
+
             if self.handle_publish(message) {
-                let devices = self.known_alarms.entry(alarm.source()).or_default();
+                let devices: &mut HashMap<String, State> =
+                    self.known_alarms.entry(alarm.source()).or_default();
+
                 devices.insert(alarm.device, cur_state);
             }
         }
