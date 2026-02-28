@@ -134,6 +134,18 @@ pub struct AlarmsReporter<P: Publisher> {
     known_alarms: HashMap<Source, HashMap<String, (State, i32)>>,
 }
 
+fn should_publish(
+    prev: Option<&(State, i32)>,
+    cur_state: State,
+    cur_severity: i32,
+) -> bool {
+    match prev {
+        None => true,
+        Some((state, severity)) => {
+            *state != cur_state || *severity != cur_severity
+        }
+    }
+}
 impl<P: Publisher> AlarmsReporter<P> {
     pub fn new() -> Self {
         Self {
@@ -146,14 +158,13 @@ impl<P: Publisher> AlarmsReporter<P> {
         let cur_state: State = alarm.state();
         let cur_severity: i32 = alarm.severity;
 
-        let devices_opt: Option<&HashMap<String, (State, i32)>> =
-            self.known_alarms.get(&alarm.source());
+       let devices_opt: Option<&HashMap<String, (State, i32)>> =
+    self.known_alarms.get(&alarm.source());
 
-        if devices_opt.is_none_or(|devices| {
-            devices
-                .get(&alarm.device)
-                .is_none_or(|(state, severity)| cur_state != *state || cur_severity != *severity)
-        }) {
+let prev = devices_opt
+    .and_then(|devices| devices.get(&alarm.device));
+
+if should_publish(prev, cur_state, cur_severity) {
             let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
 
             let message_body = match serde_json::to_string(&payload) {
