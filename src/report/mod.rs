@@ -10,15 +10,18 @@ use std::collections::HashMap;
 use tracing::error;
 
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
-const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
+const DEFAULT_CONTROLS_HOST: &str =
+    "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
 
 const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
 const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
 fn get_publisher<P: Publisher>() -> P {
-    let host = env_var::get(CONTROLS_KAFKA_HOST).or_else(|| String::from(DEFAULT_CONTROLS_HOST));
-    let topic =
-        env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| String::from(DEFAULT_CONTROLS_TOPIC));
+    let host = env_var::get(CONTROLS_KAFKA_HOST)
+        .or_else(|| DEFAULT_CONTROLS_HOST.to_string());
+
+    let topic = env_var::get(CONTROLS_ALARMS_TOPIC)
+        .or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
 
     P::new(host, topic)
 }
@@ -65,6 +68,7 @@ struct TimestampPayload {
     seconds: i64,
     nanos: i32,
 }
+
 fn map_source(source: Source) -> String {
     match source {
         Source::Analog => "Analog",
@@ -109,6 +113,8 @@ fn build_kafka_payload(status: &Status) -> KafkaAlarmPayload {
             nanos: t.nanos,
         }),
 
+        // NOTE: Status currently doesn't expose a "detail" field in your struct,
+        // so leave it as None (matches what you were doing).
         detail: None,
 
         user: if status.user.is_empty() {
@@ -123,10 +129,12 @@ fn build_kafka_payload(status: &Status) -> KafkaAlarmPayload {
         }),
     }
 }
+
 pub struct AlarmsReporter<P: Publisher> {
     controls_publisher: P,
-    known_alarms: HashMap<Source, HashMap<String, State>>,
+    known_alarms: HashMap<Source, HashMap<String, (State, i32)>>,
 }
+
 impl<P: Publisher> AlarmsReporter<P> {
     pub fn new() -> Self {
         Self {
@@ -137,14 +145,16 @@ impl<P: Publisher> AlarmsReporter<P> {
 
     pub fn report(&mut self, alarm: Status) {
         let cur_state: State = alarm.state();
-        let devices_opt: Option<&HashMap<String, State>> = self.known_alarms.get(&alarm.source());
+        let cur_severity: i32 = alarm.severity;
 
-        if devices_opt.is_none_or(|devices: &HashMap<String, State>| {
+        let devices_opt: Option<&HashMap<String, (State, i32)>> =
+            self.known_alarms.get(&alarm.source());
+
+        if devices_opt.is_none_or(|devices| {
             devices
                 .get(&alarm.device)
-                .is_none_or(|state: &State| cur_state != *state)
+                .is_none_or(|(state, severity)| cur_state != *state || cur_severity != *severity)
         }) {
-            
             let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
 
             let message_body = match serde_json::to_string(&payload) {
@@ -160,19 +170,15 @@ impl<P: Publisher> AlarmsReporter<P> {
                 }
             };
 
-            tracing::info!(
-                target = "kafka",
-                payload = %message_body,
-                "Kafka payload"
-            );
+            tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
 
             let message: Message = alarm_to_message(&alarm, message_body);
 
             if self.handle_publish(message) {
-                let devices: &mut HashMap<String, State> =
+                let devices: &mut HashMap<String, (State, i32)> =
                     self.known_alarms.entry(alarm.source()).or_default();
 
-                devices.insert(alarm.device, cur_state);
+                devices.insert(alarm.device, (cur_state, cur_severity));
             }
         }
     }
@@ -255,8 +261,9 @@ mod tests {
     fn report_alarm_not_active() {
         let mut test_reporter = AlarmsReporter::<TestPub>::new();
 
-        let mut analog_alarms = HashMap::new();
-        analog_alarms.insert("test device".to_string(), State::Alarmed);
+        let mut analog_alarms: HashMap<String, (State, i32)> = HashMap::new();
+        analog_alarms.insert("test device".to_string(), (State::Alarmed, Severity::Low as i32));
+
         test_reporter
             .known_alarms
             .insert(Source::Analog, analog_alarms);
@@ -265,10 +272,10 @@ mod tests {
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(Source::Analog))
+                .get(&Source::Analog)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Ok))
+            Some(&(State::Ok, Severity::Low as i32))
         );
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
@@ -280,11 +287,7 @@ mod tests {
             known_alarms: HashMap::new(),
         };
 
-        test_reporter.report(get_test_alarm(
-            "test device",
-            State::Alarmed,
-            Source::Digital,
-        ));
+        test_reporter.report(get_test_alarm("test device", State::Alarmed, Source::Digital));
         assert!(test_reporter.known_alarms.is_empty());
         assert!(test_reporter.controls_publisher.latest.is_none());
     }
@@ -300,14 +303,14 @@ mod tests {
         assert!(
             test_reporter
                 .known_alarms
-                .get(&(Source::Analog))
+                .get(&Source::Analog)
                 .unwrap()
                 .contains_key("device 2")
         );
         assert!(
             test_reporter
                 .known_alarms
-                .get(&(Source::Epics))
+                .get(&Source::Epics)
                 .unwrap()
                 .contains_key("device 7")
         );
@@ -319,18 +322,18 @@ mod tests {
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(Source::Analog))
+                .get(&Source::Analog)
                 .unwrap()
                 .get("device 2"),
-            Some(&(State::Ok))
+            Some(&(State::Ok, Severity::Low as i32))
         );
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(Source::Epics))
+                .get(&Source::Epics)
                 .unwrap()
                 .get("device 7"),
-            Some(&(State::Alarmed))
+            Some(&(State::Alarmed, Severity::Low as i32))
         );
         assert_eq!(test_reporter.known_alarms.len(), 2);
     }
@@ -344,19 +347,19 @@ mod tests {
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(source))
+                .get(&source)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Ok))
+            Some(&(State::Ok, Severity::Low as i32))
         );
         test_reporter.report(get_test_alarm("test device", State::Alarmed, source));
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(source))
+                .get(&source)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Alarmed))
+            Some(&(State::Alarmed, Severity::Low as i32))
         );
     }
 
@@ -369,19 +372,19 @@ mod tests {
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(source))
+                .get(&source)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Ok))
+            Some(&(State::Ok, Severity::Low as i32))
         );
         test_reporter.report(get_test_alarm("test device", State::Ok, source));
         assert_eq!(
             test_reporter
                 .known_alarms
-                .get(&(source))
+                .get(&source)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Ok))
+            Some(&(State::Ok, Severity::Low as i32))
         );
     }
 }
