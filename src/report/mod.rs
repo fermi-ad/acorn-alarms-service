@@ -113,8 +113,7 @@ fn build_kafka_payload(status: &Status) -> KafkaAlarmPayload {
             nanos: t.nanos,
         }),
 
-        // NOTE: Status currently doesn't expose a "detail" field in your struct,
-        // so leave it as None (matches what you were doing).
+        // Status currently doesn't expose a "detail" field in the struct, leave it as none
         detail: None,
 
         user: if status.user.is_empty() {
