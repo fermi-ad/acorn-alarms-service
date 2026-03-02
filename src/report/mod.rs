@@ -165,6 +165,15 @@ let prev = devices_opt
     .and_then(|devices| devices.get(&alarm.device));
 
 if should_publish(prev, cur_state, cur_severity) {
+
+     tracing::info!(
+        target = "alarm_transition",
+        device = %alarm.device,
+        source = %map_source(alarm.source()),
+        previous = ?prev,
+        current = ?(cur_state, cur_severity),
+        "Alarm state transition detected"
+    );
             let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
 
             let message_body = match serde_json::to_string(&payload) {
