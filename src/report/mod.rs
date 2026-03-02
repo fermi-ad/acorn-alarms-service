@@ -10,18 +10,15 @@ use std::collections::HashMap;
 use tracing::error;
 
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
-const DEFAULT_CONTROLS_HOST: &str =
-    "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
+const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
 
 const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
 const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
 fn get_publisher<P: Publisher>() -> P {
-    let host = env_var::get(CONTROLS_KAFKA_HOST)
-        .or_else(|| DEFAULT_CONTROLS_HOST.to_string());
+    let host = env_var::get(CONTROLS_KAFKA_HOST).or_else(|| DEFAULT_CONTROLS_HOST.to_string());
 
-    let topic = env_var::get(CONTROLS_ALARMS_TOPIC)
-        .or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
+    let topic = env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
 
     P::new(host, topic)
 }
@@ -134,16 +131,10 @@ pub struct AlarmsReporter<P: Publisher> {
     known_alarms: HashMap<Source, HashMap<String, (State, i32)>>,
 }
 
-fn should_publish(
-    prev: Option<&(State, i32)>,
-    cur_state: State,
-    cur_severity: i32,
-) -> bool {
+fn should_publish(prev: Option<&(State, i32)>, cur_state: State, cur_severity: i32) -> bool {
     match prev {
         None => true,
-        Some((state, severity)) => {
-            *state != cur_state || *severity != cur_severity
-        }
+        Some((state, severity)) => *state != cur_state || *severity != cur_severity,
     }
 }
 impl<P: Publisher> AlarmsReporter<P> {
@@ -158,22 +149,20 @@ impl<P: Publisher> AlarmsReporter<P> {
         let cur_state: State = alarm.state();
         let cur_severity: i32 = alarm.severity;
 
-       let devices_opt: Option<&HashMap<String, (State, i32)>> =
-    self.known_alarms.get(&alarm.source());
+        let devices_opt: Option<&HashMap<String, (State, i32)>> =
+            self.known_alarms.get(&alarm.source());
 
-let prev = devices_opt
-    .and_then(|devices| devices.get(&alarm.device));
+        let prev = devices_opt.and_then(|devices| devices.get(&alarm.device));
 
-if should_publish(prev, cur_state, cur_severity) {
-
-     tracing::info!(
-        target = "alarm_transition",
-        device = %alarm.device,
-        source = %map_source(alarm.source()),
-        previous = ?prev,
-        current = ?(cur_state, cur_severity),
-        "Alarm state transition detected"
-    );
+        if should_publish(prev, cur_state, cur_severity) {
+            tracing::info!(
+                target = "alarm_transition",
+                device = %alarm.device,
+                source = %map_source(alarm.source()),
+                previous = ?prev,
+                current = ?(cur_state, cur_severity),
+                "Alarm state transition detected"
+            );
             let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
 
             let message_body = match serde_json::to_string(&payload) {
@@ -281,7 +270,10 @@ mod tests {
         let mut test_reporter = AlarmsReporter::<TestPub>::new();
 
         let mut analog_alarms: HashMap<String, (State, i32)> = HashMap::new();
-        analog_alarms.insert("test device".to_string(), (State::Alarmed, Severity::Low as i32));
+        analog_alarms.insert(
+            "test device".to_string(),
+            (State::Alarmed, Severity::Low as i32),
+        );
 
         test_reporter
             .known_alarms
@@ -306,7 +298,11 @@ mod tests {
             known_alarms: HashMap::new(),
         };
 
-        test_reporter.report(get_test_alarm("test device", State::Alarmed, Source::Digital));
+        test_reporter.report(get_test_alarm(
+            "test device",
+            State::Alarmed,
+            Source::Digital,
+        ));
         assert!(test_reporter.known_alarms.is_empty());
         assert!(test_reporter.controls_publisher.latest.is_none());
     }
@@ -405,5 +401,24 @@ mod tests {
                 .get("test device"),
             Some(&(State::Ok, Severity::Low as i32))
         );
+    }
+
+    #[test]
+    fn test_should_publish_logic() {
+        // New alarm
+        assert!(should_publish(None, State::Ok, 1));
+
+        // Same state and severity : should not publish
+        let prev = Some(&(State::Ok, 1));
+        assert!(!should_publish(prev, State::Ok, 1));
+
+        // State change only : should publish
+        assert!(should_publish(prev, State::Alarmed, 1));
+
+        // Severity change only : should publish
+        assert!(should_publish(prev, State::Ok, 2));
+
+        // Both change : should publish
+        assert!(should_publish(prev, State::Alarmed, 2));
     }
 }
