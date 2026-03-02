@@ -183,10 +183,18 @@ impl<P: Publisher> AlarmsReporter<P> {
             let message: Message = alarm_to_message(&alarm, message_body);
 
             if self.handle_publish(message) {
-                let devices: &mut HashMap<String, (State, i32)> =
-                    self.known_alarms.entry(alarm.source()).or_default();
+                if cur_state == State::Ok {
+                    if let Some(devices) = self.known_alarms.get_mut(&alarm.source()) {
+                        devices.remove(&alarm.device);
 
-                devices.insert(alarm.device, (cur_state, cur_severity));
+                        if devices.is_empty() {
+                            self.known_alarms.remove(&alarm.source());
+                        }
+                    }
+                } else {
+                    let devices = self.known_alarms.entry(alarm.source()).or_default();
+                    devices.insert(alarm.device, (cur_state, cur_severity));
+                }
             }
         }
     }
@@ -280,14 +288,8 @@ mod tests {
             .insert(Source::Analog, analog_alarms);
 
         test_reporter.report(get_test_alarm("test device", State::Ok, Source::Analog));
-        assert_eq!(
-            test_reporter
-                .known_alarms
-                .get(&Source::Analog)
-                .unwrap()
-                .get("test device"),
-            Some(&(State::Ok, Severity::Low as i32))
-        );
+
+        assert!(test_reporter.known_alarms.get(&Source::Analog).is_none());
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
 
@@ -334,14 +336,7 @@ mod tests {
         // Clear alarm for only one device
         test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        assert_eq!(
-            test_reporter
-                .known_alarms
-                .get(&Source::Analog)
-                .unwrap()
-                .get("device 2"),
-            Some(&(State::Ok, Severity::Low as i32))
-        );
+        assert!(test_reporter.known_alarms.get(&Source::Analog).is_none());
         assert_eq!(
             test_reporter
                 .known_alarms
@@ -350,7 +345,7 @@ mod tests {
                 .get("device 7"),
             Some(&(State::Alarmed, Severity::Low as i32))
         );
-        assert_eq!(test_reporter.known_alarms.len(), 2);
+        assert_eq!(test_reporter.known_alarms.len(), 1);
     }
 
     #[test]
@@ -359,14 +354,8 @@ mod tests {
 
         let source = Source::Analog;
         test_reporter.report(get_test_alarm("test device", State::Ok, source));
-        assert_eq!(
-            test_reporter
-                .known_alarms
-                .get(&source)
-                .unwrap()
-                .get("test device"),
-            Some(&(State::Ok, Severity::Low as i32))
-        );
+
+        assert!(test_reporter.known_alarms.get(&source).is_none());
         test_reporter.report(get_test_alarm("test device", State::Alarmed, source));
         assert_eq!(
             test_reporter
@@ -384,23 +373,7 @@ mod tests {
 
         let source = Source::Analog;
         test_reporter.report(get_test_alarm("test device", State::Ok, source));
-        assert_eq!(
-            test_reporter
-                .known_alarms
-                .get(&source)
-                .unwrap()
-                .get("test device"),
-            Some(&(State::Ok, Severity::Low as i32))
-        );
-        test_reporter.report(get_test_alarm("test device", State::Ok, source));
-        assert_eq!(
-            test_reporter
-                .known_alarms
-                .get(&source)
-                .unwrap()
-                .get("test device"),
-            Some(&(State::Ok, Severity::Low as i32))
-        );
+        assert!(test_reporter.known_alarms.get(&source).is_none());
     }
 
     #[test]
