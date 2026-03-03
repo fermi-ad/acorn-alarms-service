@@ -44,7 +44,7 @@ The following packages must be present on the host machine when building this ap
 - Report changes of alarm states by adding records to a Kafka service
 - Monitor Kafka for changes from clients (ACORN or Phoebus)
 - Periodically re-request the set of all device alarms from Device gRPC service(s)
-  - Cancel and re-issue alarm listening requests if device alarm set has changed
+- Cancel and re-issue alarm listening requests if device alarm set has changed
 
 ### Device/Kafka Alarm States
 
@@ -92,36 +92,45 @@ stateDiagram-v2
 
 ### Kafka Schema
 
-A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating records) and shall record the most recent state of alarms for a given device.
+A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating messages) and shall record the most recent state for a given device alarm.
 
-The Key for a record shall be the device name, and the payload shall be a JSON string.
+#### Key
 
-Given the respective rules of operation for ACNET and EPICS:
-- An ACNET device record shall only have either a single "analog" element and/or a single "digital" element.
-- An EPICS device record shall only have a single "epics" element.
+The Key for a message shall be the device name, plus a suffix consisting of a '#' separator character and one of the possible Source values:
+- "Analog"
+- "Digital"
+- "Epics"
+
+See [Example Kafka Records](#example-kafka-records) below.
+
+#### Value
+
+The Value for a message shall be a JSON string.
 
 #### JSON Schema for Values
+
+Refer also to https://github.com/fermi-ad/interface-definitions/blob/main/proto/controls/common/v1/alarm.proto
 ```
 {
-  "analog"  : { <JSON> }  //  ACNET analog alarm (can also have digital)
-  "digital" : { <JSON> }  //  ACNET digital alarm (can also have analog)
-  "epics"   : { <JSON> }  //  EPICS alarm (type specified by "type" below)(aka EPICS 'status')
-  "state"   : "ok" | "alarmed" | "bypassed" | "latched" | "acknowledged"
-  "time"    : { "seconds":<int64>, "nanos":<int32> }  //  per gRPC Timestamp
-  "type"    : "hihi" | "high" | "low" | "lolo" | ...  //  optional see EPICS alarm status definitions
-  "user"    : <name of user who changed state>        //  optional
-  "wake"    : { "seconds":<int64>, "nanos":<int32> }  //  optional
+  "Device"          : <name of device without Source suffix>    //  see Key above
+  "Source"          : "Analog" | "Digital" | "Epics"
+  "State"           : "Ok" | "Alarmed" | "Bypassed" | "Latched" | "Acknowledged"
+  "Severity"        : "Low" | "High"                            //  (optional)
+  "Acknowledgeable" : "True" | "False"                          //  (optional)
+  "Time"            : { "seconds":<int64>, "nanos":<int32> }    //  per gRPC Timestamp
+  "Detail"          : <uint32 meaning depends on Source field>  //  (optional)
+  "User"            : <name of user who changed state>          //  (optional)
+  "Wake"            : { "seconds":<int64>, "nanos":<int32> }    //  per gRPC Timestamp (optional)
 }
 ```
-[EPICS alarm status definitions]( https://docs.epics-controls.org/projects/base/en/7.0.10/alarm_h.html)
 
 #### Example Kafka Records
 
 | Key | Value
 |-----|------
-| G:AMANDA | { "analog" : {<br>&emsp;&emsp;"state" : "acknowledged",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave"<br>&emsp;},<br>&nbsp;&nbsp;&nbsp;"digital" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
-| PIP2IT:pHB650_CRYO_TX103:TempK | { "epics" : {<br>&emsp;&emsp;"state" : "alarmed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"type" : "hihi"<br>}&nbsp;&nbsp;}
-| Z:ACLTST | { "digital" : {<br>&emsp;&emsp;"state":"bypassed",<br>&emsp;&emsp;"time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;&emsp;"user":"dave",<br>&emsp;&emsp;"wake" : { "seconds" : 2345,"nanos" : 6789 }<br>}&nbsp;&nbsp;}
+| G:AMANDA#Analog | {<br>&emsp;"Device" : "G:AMANDA",<br>&emsp;"Source" : "Analog",<br>&emsp;"State" : "Bypassed",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;"User" : "Dave",<br>&emsp;"Wake" : { "seconds" : 2345, "nanos" : 6789 }<br>}
+| PIP2IT:pHB650_CRYO_TX103:TempK#Epics | {<br>&emsp;"Device" : "PIP2IT:pHB650_CRYO_TX103:TempK",<br>&emsp;"Source" : "Epics",<br>&emsp;"State" : "Alarmed",<br>&emsp;"Severity" : "Low",<br>&emsp;"Acknowledgeable" : "False",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;"Detail" : 3<br>}
+| Z:ACLTST#Digital | {<br>&emsp;"Device" : "Z:ACLTST",<br>&emsp;"Source" : "Digital",<br>&emsp;"State" : "Alarmed",<br>&emsp;"Severity" : "High",<br>&emsp;"Acknowledgeable" : "True",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 }<br>&emsp;"Detail" : 1234<br>}
 
 ### Alarm Configuration Info (Device DB)
 
