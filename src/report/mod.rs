@@ -289,7 +289,7 @@ mod tests {
 
         test_reporter.report(get_test_alarm("test device", State::Ok, Source::Analog));
 
-        assert!(test_reporter.known_alarms.get(&Source::Analog).is_none());
+        assert!(!test_reporter.known_alarms.contains_key(&Source::Analog));
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
 
@@ -336,7 +336,7 @@ mod tests {
         // Clear alarm for only one device
         test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        assert!(test_reporter.known_alarms.get(&Source::Analog).is_none());
+        assert!(!test_reporter.known_alarms.contains_key(&Source::Analog));
         assert_eq!(
             test_reporter
                 .known_alarms
@@ -355,7 +355,7 @@ mod tests {
         let source = Source::Analog;
         test_reporter.report(get_test_alarm("test device", State::Ok, source));
 
-        assert!(test_reporter.known_alarms.get(&source).is_none());
+        assert!(!test_reporter.known_alarms.contains_key(&source));
         test_reporter.report(get_test_alarm("test device", State::Alarmed, source));
         assert_eq!(
             test_reporter
@@ -373,7 +373,7 @@ mod tests {
 
         let source = Source::Analog;
         test_reporter.report(get_test_alarm("test device", State::Ok, source));
-        assert!(test_reporter.known_alarms.get(&source).is_none());
+        assert!(!test_reporter.known_alarms.contains_key(&source));
     }
 
     #[test]
