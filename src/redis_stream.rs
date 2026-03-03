@@ -1,5 +1,6 @@
 use redis::{Value, streams::StreamReadReply};
-use std::{env, error::Error};
+use rust_env_var_lib::env_var;
+use std::error::Error;
 use tracing::{info, warn};
 
 use crate::proto::common::alarm::{
@@ -22,9 +23,12 @@ const DEFAULT_STREAM_KEY: &str = "acorn:alarms";
 pub async fn start_redis_reader(
     reporter: Arc<Mutex<AlarmsReporter<KafkaPublisher>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let host = get_env(ALARM_REDIS_HOST, DEFAULT_REDIS_HOST);
-    let port = get_env(ALARM_REDIS_PORT, DEFAULT_REDIS_PORT);
-    let stream_key = get_env(ALARM_REDIS_STREAM_KEY, DEFAULT_STREAM_KEY);
+    let host = env_var::get(ALARM_REDIS_HOST).or_else(|| DEFAULT_REDIS_HOST.to_string());
+
+    let port = env_var::get(ALARM_REDIS_PORT).or_else(|| DEFAULT_REDIS_PORT.to_string());
+
+    let stream_key =
+        env_var::get(ALARM_REDIS_STREAM_KEY).or_else(|| DEFAULT_STREAM_KEY.to_string());
 
     let url = format!("redis://{}:{}/", host, port);
 
@@ -110,12 +114,7 @@ pub async fn start_redis_reader(
                     "Parsed alarm fields"
                 );
 
-                let status = build_status_from_redis(
-                    device.clone().unwrap(),
-                    severity.clone(),
-                    state.clone(),
-                    source.clone(),
-                );
+                let status = build_status_from_redis(device.unwrap(), severity, state, source);
 
                 // Publish via shared Kafka reporter
                 if let Ok(mut rep) = reporter.lock() {
@@ -128,19 +127,11 @@ pub async fn start_redis_reader(
     }
 }
 
-fn get_env(name: &str, default: &str) -> String {
-    match env::var(name) {
-        Ok(v) if !v.is_empty() => v,
-        _ => default.to_string(),
-    }
-}
-
 fn map_to_string(map: &std::collections::HashMap<String, Value>, key: &str) -> Option<String> {
     map.get(key).and_then(|v| match v {
         Value::BulkString(bytes) => Some(String::from_utf8_lossy(bytes).to_string()),
         Value::SimpleString(s) => Some(s.clone()),
         Value::Int(i) => Some(i.to_string()),
-        Value::Nil => None,
         _ => None,
     })
 }

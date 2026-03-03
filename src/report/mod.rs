@@ -1,11 +1,9 @@
-use crate::proto::common::alarm::status::Severity;
 use crate::proto::common::alarm::{
     Status,
     status::{Source, State},
 };
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Message, Publisher};
-use serde::Serialize;
 use std::collections::HashMap;
 use tracing::error;
 
@@ -25,104 +23,8 @@ fn get_publisher<P: Publisher>() -> P {
 
 fn alarm_to_message(status: &Status, message_body: String) -> Message {
     Message {
-        key: Some(format!("{}#{}", status.device, map_source(status.source()))),
+        key: Some(format!("{}#{:?}", status.device, status.source())),
         value: message_body,
-    }
-}
-
-#[derive(Serialize)]
-struct KafkaAlarmPayload {
-    #[serde(rename = "Device")]
-    device: String,
-
-    #[serde(rename = "Source")]
-    source: String,
-
-    #[serde(rename = "State")]
-    state: String,
-
-    #[serde(rename = "Severity")]
-    severity: String,
-
-    #[serde(rename = "Acknowledgeable")]
-    acknowledgeable: String,
-
-    #[serde(rename = "Time")]
-    time: Option<TimestampPayload>,
-
-    #[serde(rename = "Detail")]
-    detail: Option<u32>,
-
-    #[serde(rename = "User")]
-    user: Option<String>,
-
-    #[serde(rename = "Wake")]
-    wake: Option<TimestampPayload>,
-}
-
-#[derive(Serialize)]
-struct TimestampPayload {
-    seconds: i64,
-    nanos: i32,
-}
-
-fn map_source(source: Source) -> String {
-    match source {
-        Source::Analog => "Analog",
-        Source::Digital => "Digital",
-        Source::Epics => "Epics",
-        _ => "Unknown",
-    }
-    .to_string()
-}
-
-fn map_state(state: State) -> String {
-    match state {
-        State::Ok => "Ok",
-        State::Alarmed => "Alarmed",
-        State::Bypassed => "Bypassed",
-        State::Latched => "Latched",
-        State::Acknowledged => "Acknowledged",
-        _ => "Unknown",
-    }
-    .to_string()
-}
-
-fn map_severity(sev: Severity) -> String {
-    match sev {
-        Severity::Low => "Low",
-        Severity::High => "High",
-        _ => "Unknown",
-    }
-    .to_string()
-}
-
-fn build_kafka_payload(status: &Status) -> KafkaAlarmPayload {
-    KafkaAlarmPayload {
-        device: status.device.clone(),
-        source: map_source(status.source()),
-        state: map_state(status.state()),
-        severity: map_severity(status.severity()),
-        acknowledgeable: status.acknowledgeable.to_string(),
-
-        time: status.time.as_ref().map(|t| TimestampPayload {
-            seconds: t.seconds,
-            nanos: t.nanos,
-        }),
-
-        // Status currently doesn't expose a "detail" field in the struct, leave it as none
-        detail: None,
-
-        user: if status.user.is_empty() {
-            None
-        } else {
-            Some(status.user.clone())
-        },
-
-        wake: status.wake.as_ref().map(|t| TimestampPayload {
-            seconds: t.seconds,
-            nanos: t.nanos,
-        }),
     }
 }
 
@@ -131,12 +33,6 @@ pub struct AlarmsReporter<P: Publisher> {
     known_alarms: HashMap<Source, HashMap<String, (State, i32)>>,
 }
 
-fn should_publish(prev: Option<&(State, i32)>, cur_state: State, cur_severity: i32) -> bool {
-    match prev {
-        None => true,
-        Some((state, severity)) => *state != cur_state || *severity != cur_severity,
-    }
-}
 impl<P: Publisher> AlarmsReporter<P> {
     pub fn new() -> Self {
         Self {
@@ -145,27 +41,36 @@ impl<P: Publisher> AlarmsReporter<P> {
         }
     }
 
+    fn should_publish(&self, alarm: &Status) -> bool {
+        let prev = self
+            .known_alarms
+            .get(&alarm.source())
+            .and_then(|devices| devices.get(&alarm.device));
+
+        match prev {
+            None => true,
+            Some((state, severity)) => *state != alarm.state() || *severity != alarm.severity,
+        }
+    }
     pub fn report(&mut self, alarm: Status) {
-        let cur_state: State = alarm.state();
-        let cur_severity: i32 = alarm.severity;
+        let cur_state = alarm.state();
+        let cur_severity = alarm.severity;
 
-        let devices_opt: Option<&HashMap<String, (State, i32)>> =
-            self.known_alarms.get(&alarm.source());
+        if self.should_publish(&alarm) {
+            let prev = self
+                .known_alarms
+                .get(&alarm.source())
+                .and_then(|devices| devices.get(&alarm.device));
 
-        let prev = devices_opt.and_then(|devices| devices.get(&alarm.device));
-
-        if should_publish(prev, cur_state, cur_severity) {
             tracing::info!(
                 target = "alarm_transition",
                 device = %alarm.device,
-                source = %map_source(alarm.source()),
+                source = ?alarm.source(),
                 previous = ?prev,
                 current = ?(cur_state, cur_severity),
                 "Alarm state transition detected"
             );
-            let payload: KafkaAlarmPayload = build_kafka_payload(&alarm);
-
-            let message_body = match serde_json::to_string(&payload) {
+            let message_body = match serde_json::to_string(&alarm) {
                 Ok(body) => body,
                 Err(err) => {
                     error!(
@@ -177,8 +82,6 @@ impl<P: Publisher> AlarmsReporter<P> {
                     return;
                 }
             };
-
-            tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
 
             let message: Message = alarm_to_message(&alarm, message_body);
 
@@ -200,13 +103,24 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn handle_publish(&mut self, message: Message) -> bool {
+        let key = message.key.clone();
+
         match self.controls_publisher.publish(message) {
             Ok(_) => {
-                tracing::info!(target = "kafka", "Published alarm to Kafka");
+                tracing::info!(
+                    target = "kafka",
+                    key = ?key,
+                    "Published alarm to Kafka"
+                );
                 true
             }
             Err(err) => {
-                error!("{err:?}");
+                tracing::error!(
+                    target = "kafka",
+                    error = ?err,
+                    key = ?key,
+                    "Kafka publish failed"
+                );
                 false
             }
         }
@@ -377,21 +291,25 @@ mod tests {
     }
 
     #[test]
+
     fn test_should_publish_logic() {
-        // New alarm
-        assert!(should_publish(None, State::Ok, 1));
+        let reporter = AlarmsReporter::<TestPub>::new();
 
-        // Same state and severity : should not publish
-        let prev = Some(&(State::Ok, 1));
-        assert!(!should_publish(prev, State::Ok, 1));
+        // New alarm should publish
+        let alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
+        assert!(reporter.should_publish(&alarm));
 
-        // State change only : should publish
-        assert!(should_publish(prev, State::Alarmed, 1));
+        let mut reporter = AlarmsReporter::<TestPub>::new();
+        reporter
+            .known_alarms
+            .entry(Source::Analog)
+            .or_default()
+            .insert("dev1".to_string(), (State::Ok, 1));
 
-        // Severity change only : should publish
-        assert!(should_publish(prev, State::Ok, 2));
+        let same_alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
+        assert!(!reporter.should_publish(&same_alarm));
 
-        // Both change : should publish
-        assert!(should_publish(prev, State::Alarmed, 2));
+        let state_change = get_test_alarm("dev1", State::Alarmed, Source::Analog);
+        assert!(reporter.should_publish(&state_change));
     }
 }
