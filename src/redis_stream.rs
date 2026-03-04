@@ -1,7 +1,7 @@
 use redis::{Value, streams::StreamReadReply};
 use rust_env_var_lib::env_var;
 use std::error::Error;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::proto::common::alarm::{
     Status,
@@ -10,7 +10,7 @@ use crate::proto::common::alarm::{
 use crate::proto::google::protobuf::Timestamp;
 use crate::report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
-use std::sync::{Arc, Mutex};
+
 
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
@@ -21,7 +21,7 @@ const DEFAULT_REDIS_PORT: &str = "6379";
 const DEFAULT_STREAM_KEY: &str = "acorn:alarms";
 
 pub async fn start_redis_reader(
-    reporter: Arc<Mutex<AlarmsReporter<KafkaPublisher>>>,
+    reporter: &mut AlarmsReporter<KafkaPublisher>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let host = env_var::get(ALARM_REDIS_HOST).or_else(|| DEFAULT_REDIS_HOST.to_string());
 
@@ -32,7 +32,7 @@ pub async fn start_redis_reader(
 
     let url = format!("redis://{}:{}/", host, port);
 
-    info!(
+    debug!(
         target = "redis_stream",
         url = %url,
         stream = %stream_key,
@@ -44,12 +44,12 @@ pub async fn start_redis_reader(
 
     let mut last_id = "0-0".to_string();
 
-    info!(
+    debug!(
         target = "redis_stream",
         "Starting Redis reader from 0-0 (load recent alarm state on startup)"
     );
 
-    info!(
+    debug!(
         target = "redis_stream",
         "Redis reader ready, waiting for alarms"
     );
@@ -77,9 +77,10 @@ pub async fn start_redis_reader(
             }
         };
 
-        let Some(reply) = reply else {
-            continue;
-        };
+        if reply.is_none() {
+    continue;
+}
+let reply = reply.unwrap();
 
         for stream in reply.keys {
             for entry in stream.ids {
@@ -88,7 +89,7 @@ pub async fn start_redis_reader(
                 let state = map_to_string(&entry.map, "state");
                 let source = map_to_string(&entry.map, "source");
 
-                info!(
+                debug!(
                     target = "redis_stream",
                     stream = %stream_key,
                     id = %entry.id,
@@ -105,7 +106,7 @@ pub async fn start_redis_reader(
                     continue;
                 }
 
-                info!(
+                debug!(
                     target = "redis_stream",
                     device = ?device,
                     severity = ?severity,
@@ -117,9 +118,8 @@ pub async fn start_redis_reader(
                 let status = build_status_from_redis(device.unwrap(), severity, state, source);
 
                 // Publish via shared Kafka reporter
-                if let Ok(mut rep) = reporter.lock() {
-                    rep.report(status);
-                }
+               // Publish via Kafka reporter
+reporter.report(status);
 
                 last_id = entry.id.clone();
             }

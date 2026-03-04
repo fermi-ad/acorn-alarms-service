@@ -5,8 +5,7 @@ mod report;
 use crate::redis_stream::start_redis_reader;
 use report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
-use std::sync::{Arc, Mutex};
-use tracing::{Level, error, info};
+use tracing::{Level, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,22 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Acorn Alarms Service starting…");
 
     // Shared Kafka reporter
-    let reporter = Arc::new(Mutex::new(AlarmsReporter::<KafkaPublisher>::new()));
+    let mut reporter = AlarmsReporter::<KafkaPublisher>::new();
 
-    let reporter_clone = reporter.clone();
-
-    // Redis reader background task
-    tokio::spawn(async move {
-        loop {
-            if let Err(e) = start_redis_reader(reporter_clone.clone()).await {
-                error!("Redis reader stopped: {:?}", e);
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-        }
-    });
-
-    // Keep service alive
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        if let Err(err) = start_redis_reader(&mut reporter).await {
+            tracing::error!("Redis reader error: {:?}", err);
+        }
     }
 }

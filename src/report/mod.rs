@@ -1,6 +1,6 @@
 use crate::proto::common::alarm::{
     Status,
-    status::{Source, State},
+    status::{Severity, Source, State},
 };
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Message, Publisher};
@@ -30,7 +30,7 @@ fn alarm_to_message(status: &Status, message_body: String) -> Message {
 
 pub struct AlarmsReporter<P: Publisher> {
     controls_publisher: P,
-    known_alarms: HashMap<Source, HashMap<String, (State, i32)>>,
+    known_alarms: HashMap<Source, HashMap<String, (State, Severity)>>,
 }
 
 impl<P: Publisher> AlarmsReporter<P> {
@@ -49,12 +49,12 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         match prev {
             None => true,
-            Some((state, severity)) => *state != alarm.state() || *severity != alarm.severity,
+            Some((state, severity)) => *state != alarm.state() || *severity != alarm.severity(),
         }
     }
     pub fn report(&mut self, alarm: Status) {
         let cur_state = alarm.state();
-        let cur_severity = alarm.severity;
+        let cur_severity = alarm.severity();
 
         if self.should_publish(&alarm) {
             let prev = self
@@ -74,7 +74,7 @@ impl<P: Publisher> AlarmsReporter<P> {
                 Ok(body) => body,
                 Err(err) => {
                     error!(
-                        "Failed to serialize alarm object for {}:{:?}\n{}",
+                        "Failed to serialize alarm object for {}#{:?}\n{}",
                         alarm.device,
                         alarm.source(),
                         err
@@ -83,16 +83,14 @@ impl<P: Publisher> AlarmsReporter<P> {
                 }
             };
 
+            tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
+
             let message: Message = alarm_to_message(&alarm, message_body);
 
             if self.handle_publish(message) {
                 if cur_state == State::Ok {
                     if let Some(devices) = self.known_alarms.get_mut(&alarm.source()) {
                         devices.remove(&alarm.device);
-
-                        if devices.is_empty() {
-                            self.known_alarms.remove(&alarm.source());
-                        }
                     }
                 } else {
                     let devices = self.known_alarms.entry(alarm.source()).or_default();
@@ -103,7 +101,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn handle_publish(&mut self, message: Message) -> bool {
-        let key = message.key.clone();
+        let key = message.key.clone(); // extract before move
 
         match self.controls_publisher.publish(message) {
             Ok(_) => {
@@ -191,19 +189,17 @@ mod tests {
     fn report_alarm_not_active() {
         let mut test_reporter = AlarmsReporter::<TestPub>::new();
 
-        let mut analog_alarms: HashMap<String, (State, i32)> = HashMap::new();
-        analog_alarms.insert(
-            "test device".to_string(),
-            (State::Alarmed, Severity::Low as i32),
-        );
+        let mut analog_alarms: HashMap<String, (State, Severity)> = HashMap::new();
+        analog_alarms.insert("test device".to_string(), (State::Alarmed, Severity::Low));
 
         test_reporter
             .known_alarms
             .insert(Source::Analog, analog_alarms);
 
-        test_reporter.report(get_test_alarm("test device", State::Ok, Source::Analog));
+        test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        assert!(!test_reporter.known_alarms.contains_key(&Source::Analog));
+        let devices = test_reporter.known_alarms.get(&Source::Analog).unwrap();
+        assert!(!devices.contains_key("device 2"));
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
 
@@ -250,14 +246,15 @@ mod tests {
         // Clear alarm for only one device
         test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        assert!(!test_reporter.known_alarms.contains_key(&Source::Analog));
+        let devices = test_reporter.known_alarms.get(&Source::Analog).unwrap();
+        assert!(!devices.contains_key("device 2"));
         assert_eq!(
             test_reporter
                 .known_alarms
                 .get(&Source::Epics)
                 .unwrap()
                 .get("device 7"),
-            Some(&(State::Alarmed, Severity::Low as i32))
+            Some(&(State::Alarmed, Severity::Low))
         );
         assert_eq!(test_reporter.known_alarms.len(), 1);
     }
@@ -277,7 +274,7 @@ mod tests {
                 .get(&source)
                 .unwrap()
                 .get("test device"),
-            Some(&(State::Alarmed, Severity::Low as i32))
+            Some(&(State::Alarmed, Severity::Low))
         );
     }
 
@@ -291,7 +288,6 @@ mod tests {
     }
 
     #[test]
-
     fn test_should_publish_logic() {
         let reporter = AlarmsReporter::<TestPub>::new();
 
@@ -299,12 +295,13 @@ mod tests {
         let alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
         assert!(reporter.should_publish(&alarm));
 
+        // Simulate stored previous state
         let mut reporter = AlarmsReporter::<TestPub>::new();
         reporter
             .known_alarms
             .entry(Source::Analog)
             .or_default()
-            .insert("dev1".to_string(), (State::Ok, 1));
+            .insert("dev1".to_string(), (State::Ok, Severity::Low));
 
         let same_alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
         assert!(!reporter.should_publish(&same_alarm));
