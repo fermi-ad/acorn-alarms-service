@@ -256,7 +256,7 @@ mod tests {
                 .get("device 7"),
             Some(&(State::Alarmed, Severity::Low))
         );
-        assert_eq!(test_reporter.known_alarms.len(), 1);
+        assert_eq!(test_reporter.known_alarms.len(), 2);
     }
 
     #[test]
