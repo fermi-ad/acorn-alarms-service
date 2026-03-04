@@ -45,12 +45,7 @@ pub async fn start_redis_reader(
 
     debug!(
         target = "redis_stream",
-        "Starting Redis reader from 0-0 (load recent alarm state on startup)"
-    );
-
-    debug!(
-        target = "redis_stream",
-        "Redis reader ready, waiting for alarms"
+        "Starting Redis reader from 0-0 (loading recent alarms), waiting for alarms"
     );
 
     loop {
@@ -64,9 +59,10 @@ pub async fn start_redis_reader(
             .await;
 
         let reply = match reply {
-            Ok(r) => r,
+            Ok(Some(r)) => r,
+            Ok(None) => continue,
             Err(e) => {
-                warn!(
+                warn! (
                     target = "redis_stream",
                     error = ?e,
                     "Redis XREAD failed"
@@ -75,11 +71,6 @@ pub async fn start_redis_reader(
                 continue;
             }
         };
-
-        if reply.is_none() {
-            continue;
-        }
-        let reply = reply.unwrap();
 
         for stream in reply.keys {
             for entry in stream.ids {

@@ -47,29 +47,29 @@ impl<P: Publisher> AlarmsReporter<P> {
             .get(&alarm.source())
             .and_then(|devices| devices.get(&alarm.device));
 
-        match prev {
+        let changed = match prev {
             None => true,
             Some((state, severity)) => *state != alarm.state() || *severity != alarm.severity(),
+        };
+
+        if changed {
+            tracing::debug!(
+                target = "alarm_transition",
+                device = %alarm.device,
+                source = ?alarm.source(),
+                previous = ?prev,
+                current = ?(alarm.state(), alarm.severity()),
+                "Alarm state transition detected"
+            );
         }
+
+        changed
     }
     pub fn report(&mut self, alarm: Status) {
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
 
         if self.should_publish(&alarm) {
-            let prev = self
-                .known_alarms
-                .get(&alarm.source())
-                .and_then(|devices| devices.get(&alarm.device));
-
-            tracing::info!(
-                target = "alarm_transition",
-                device = %alarm.device,
-                source = ?alarm.source(),
-                previous = ?prev,
-                current = ?(cur_state, cur_severity),
-                "Alarm state transition detected"
-            );
             let message_body = match serde_json::to_string(&alarm) {
                 Ok(body) => body,
                 Err(err) => {
@@ -105,7 +105,7 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         match self.controls_publisher.publish(message) {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     target = "kafka",
                     key = ?key,
                     "Published alarm to Kafka"
@@ -202,7 +202,7 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .map_or(true, |devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("device 2"))
         );
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
@@ -254,7 +254,7 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .map_or(true, |devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("device 2"))
         );
         assert_eq!(
             test_reporter
