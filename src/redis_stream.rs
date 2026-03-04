@@ -11,7 +11,6 @@ use crate::proto::google::protobuf::Timestamp;
 use crate::report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
 
-
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
 const ALARM_REDIS_STREAM_KEY: &str = "EPICS_ALARM_REDIS_KEY";
@@ -78,9 +77,9 @@ pub async fn start_redis_reader(
         };
 
         if reply.is_none() {
-    continue;
-}
-let reply = reply.unwrap();
+            continue;
+        }
+        let reply = reply.unwrap();
 
         for stream in reply.keys {
             for entry in stream.ids {
@@ -118,8 +117,8 @@ let reply = reply.unwrap();
                 let status = build_status_from_redis(device.unwrap(), severity, state, source);
 
                 // Publish via shared Kafka reporter
-               // Publish via Kafka reporter
-reporter.report(status);
+                // Publish via Kafka reporter
+                reporter.report(status);
 
                 last_id = entry.id.clone();
             }
