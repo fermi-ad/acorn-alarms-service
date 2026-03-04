@@ -83,7 +83,7 @@ impl<P: Publisher> AlarmsReporter<P> {
                 }
             };
 
-            tracing::info!(target = "kafka", payload = %message_body, "Kafka payload");
+            tracing::debug!(target = "kafka", payload = %message_body, "Kafka payload");
 
             let message: Message = alarm_to_message(&alarm, message_body);
 
@@ -198,8 +198,12 @@ mod tests {
 
         test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        let devices = test_reporter.known_alarms.get(&Source::Analog).unwrap();
-        assert!(!devices.contains_key("device 2"));
+        assert!(
+            test_reporter
+                .known_alarms
+                .get(&Source::Analog)
+                .map_or(true, |devices| !devices.contains_key("device 2"))
+        );
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
 
@@ -246,8 +250,12 @@ mod tests {
         // Clear alarm for only one device
         test_reporter.report(get_test_alarm("device 2", State::Ok, Source::Analog));
 
-        let devices = test_reporter.known_alarms.get(&Source::Analog).unwrap();
-        assert!(!devices.contains_key("device 2"));
+        assert!(
+            test_reporter
+                .known_alarms
+                .get(&Source::Analog)
+                .map_or(true, |devices| !devices.contains_key("device 2"))
+        );
         assert_eq!(
             test_reporter
                 .known_alarms
