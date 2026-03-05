@@ -62,10 +62,10 @@ pub async fn start_redis_reader(
             Ok(Some(r)) => r,
             Ok(None) => continue,
             Err(e) => {
-                warn! (
+                debug! (
                     target = "redis_stream",
                     error = ?e,
-                    "Redis XREAD failed"
+                    "Redis XREAD timeout"
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 continue;
