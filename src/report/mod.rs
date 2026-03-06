@@ -41,6 +41,16 @@ impl<P: Publisher> AlarmsReporter<P> {
         }
     }
 
+    fn transition_allowed(prev: State, next: State) -> bool {
+        matches!(
+            (prev, next),
+            (State::Ok, State::Alarmed)
+                | (State::Alarmed, State::Acknowledged)
+                | (State::Alarmed, State::Ok)
+                | (State::Acknowledged, State::Ok)
+        )
+    }
+
     fn should_publish(&self, alarm: &Status) -> bool {
         let prev = self
             .known_alarms
@@ -49,8 +59,19 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         let changed = match prev {
             None => true,
-            Some((state, severity)) => *state != alarm.state() || *severity != alarm.severity(),
+            Some((state, severity)) => {
+                Self::transition_allowed(*state, alarm.state()) || *severity != alarm.severity()
+            }
         };
+
+        if !changed {
+            tracing::debug!(
+                target = "alarm_transition",
+                device = %alarm.device,
+                source = ?alarm.source(),
+                "Ignoring invalid or duplicate alarm transition"
+            );
+        }
 
         if changed {
             tracing::debug!(
@@ -101,7 +122,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn handle_publish(&mut self, message: Message) -> bool {
-        let key = message.key.clone(); // extract before move
+        let key = message.key.clone(); 
 
         match self.controls_publisher.publish(message) {
             Ok(_) => {
