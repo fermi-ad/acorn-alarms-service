@@ -52,34 +52,38 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn should_publish(&self, alarm: &Status) -> bool {
+        let source = alarm.source();
+        let device = &alarm.device;
+
         let prev = self
             .known_alarms
-            .get(&alarm.source())
-            .and_then(|devices| devices.get(&alarm.device));
+            .get(&source)
+            .and_then(|devices| devices.get(device));
+
+        let next_state = alarm.state();
+        let next_severity = alarm.severity();
 
         let changed = match prev {
             None => true,
             Some((state, severity)) => {
-                Self::transition_allowed(*state, alarm.state()) || *severity != alarm.severity()
+                Self::transition_allowed(*state, next_state) || *severity != next_severity
             }
         };
 
         if !changed {
             tracing::debug!(
                 target = "alarm_transition",
-                device = %alarm.device,
-                source = ?alarm.source(),
+                device = %device,
+                source = ?source,
                 "Ignoring invalid or duplicate alarm transition"
             );
-        }
-
-        if changed {
+        } else {
             tracing::debug!(
                 target = "alarm_transition",
-                device = %alarm.device,
-                source = ?alarm.source(),
+                device = %device,
+                source = ?source,
                 previous = ?prev,
-                current = ?(alarm.state(), alarm.severity()),
+                current = ?(next_state, next_severity),
                 "Alarm state transition detected"
             );
         }
@@ -109,20 +113,23 @@ impl<P: Publisher> AlarmsReporter<P> {
             let message: Message = alarm_to_message(&alarm, message_body);
 
             if self.handle_publish(message) {
+                let source = alarm.source();
+                let device = alarm.device.clone();
+
                 if cur_state == State::Ok {
-                    if let Some(devices) = self.known_alarms.get_mut(&alarm.source()) {
-                        devices.remove(&alarm.device);
+                    if let Some(devices) = self.known_alarms.get_mut(&source) {
+                        devices.remove(&device);
                     }
                 } else {
-                    let devices = self.known_alarms.entry(alarm.source()).or_default();
-                    devices.insert(alarm.device, (cur_state, cur_severity));
+                    let devices = self.known_alarms.entry(source).or_default();
+                    devices.insert(device, (cur_state, cur_severity));
                 }
             }
         }
     }
 
     fn handle_publish(&mut self, message: Message) -> bool {
-        let key = message.key.clone(); 
+        let key = message.key.clone();
 
         match self.controls_publisher.publish(message) {
             Ok(_) => {
