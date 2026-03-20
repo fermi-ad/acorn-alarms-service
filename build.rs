@@ -13,15 +13,17 @@ fn main() {
         "interface-definitions/proto/controls/service/grpc-ioc-alarms/v1/ioc_alarms.proto";
     let alarm_struct = "interface-definitions/proto/controls/common/v1/alarm.proto";
 
+    let alarm_commands =
+        "interface-definitions/proto/controls/service/grpc-alarm-commands/v1/alarm_commands.proto";
+
     tonic_prost_build::configure()
-        .build_server(false)
+        .build_server(true)
         .file_descriptor_set_path(PathBuf::from(env::var("OUT_DIR").unwrap()).join("fds.bin"))
         .type_attribute(
             ".google.protobuf",
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .compile_well_known_types(true)
-        // DevDB large enum
         .type_attribute(
             ".services.devdb.InfoEntry.result",
             "#[allow(clippy::large_enum_variant)]",
@@ -31,7 +33,7 @@ fn main() {
             "#[derive(serde::Serialize, serde::Deserialize)]",
         )
         .compile_protos(
-            &[devdb, daq, ioc_alarms, alarm_struct],
+            &[devdb, daq, ioc_alarms, alarm_struct, alarm_commands],
             &["interface-definitions/"],
         )
         .unwrap();

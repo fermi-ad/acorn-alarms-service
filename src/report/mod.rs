@@ -7,6 +7,12 @@ use rust_pubsub_lib::{Message, Publisher};
 use std::collections::HashMap;
 use tracing::error;
 
+#[derive(Debug, Default, Clone)]
+struct CommandState {
+    bypassed: bool,
+    snoozed_until: Option<std::time::SystemTime>,
+}
+
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
 const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
 
@@ -31,6 +37,7 @@ fn alarm_to_message(status: &Status, message_body: String) -> Message {
 pub struct AlarmsReporter<P: Publisher> {
     controls_publisher: P,
     known_alarms: HashMap<Source, HashMap<String, (State, Severity)>>,
+    command_state: HashMap<String, CommandState>,
 }
 
 impl<P: Publisher> AlarmsReporter<P> {
@@ -38,9 +45,26 @@ impl<P: Publisher> AlarmsReporter<P> {
         Self {
             controls_publisher: get_publisher(),
             known_alarms: HashMap::new(),
+            command_state: HashMap::new(),
         }
     }
 
+    pub fn set_bypass(&mut self, device: String) {
+    let device = device.trim().to_uppercase();   
+
+    let state = self.command_state.entry(device).or_default();
+    state.bypassed = true;
+}
+
+    pub fn set_snooze(&mut self, device: String, duration_secs: i64) {
+    let device = device.trim().to_uppercase();  
+
+    let state = self.command_state.entry(device).or_default();
+
+    state.snoozed_until = Some(
+        std::time::SystemTime::now() + std::time::Duration::from_secs(duration_secs as u64),
+    );
+}
     fn transition_allowed(prev: State, next: State) -> bool {
         matches!(
             (prev, next),
@@ -48,25 +72,60 @@ impl<P: Publisher> AlarmsReporter<P> {
                 | (State::Alarmed, State::Acknowledged)
                 | (State::Alarmed, State::Ok)
                 | (State::Acknowledged, State::Ok)
+                | (State::Acknowledged, State::Alarmed)
         )
     }
 
     fn should_publish(&self, alarm: &Status) -> bool {
-        let source = alarm.source();
-        let device = &alarm.device;
+       let source = alarm.source();
+let device = alarm.device.trim().to_uppercase();
+
+    tracing::debug!(
+        target = "alarm_transition",
+        device = %device,
+        has_cmd = self.command_state.contains_key(&device),
+        "Checking command_state"
+    );
+
+if let Some(cmd) = self.command_state.get(&device) {
+    if cmd.bypassed {
+        tracing::debug!(
+            target = "alarm_transition",
+            device = %device,
+            "Skipping alarm due to bypass"
+        );
+        return false;  
+    }
+         if let Some(until) = cmd.snoozed_until {
+                if std::time::SystemTime::now() < until {
+                    tracing::debug!(
+                        target = "alarm_transition",
+                        device = %device,
+                        "Skipping alarm due to snooze"
+                    );
+                    return false;
+                }
+            }
+        }
 
         let prev = self
             .known_alarms
             .get(&source)
-            .and_then(|devices| devices.get(device));
+            .and_then(|devices| devices.get(&device));
 
         let next_state = alarm.state();
         let next_severity = alarm.severity();
 
         let changed = match prev {
             None => true,
-            Some((state, severity)) => {
-                Self::transition_allowed(*state, next_state) || *severity != next_severity
+            Some((prev_state, prev_severity)) => {
+                if *prev_state != next_state {
+                    Self::transition_allowed(*prev_state, next_state)
+                } else if *prev_severity != next_severity {
+                    true
+                } else {
+                    false
+                }
             }
         };
 
@@ -75,7 +134,9 @@ impl<P: Publisher> AlarmsReporter<P> {
                 target = "alarm_transition",
                 device = %device,
                 source = ?source,
-                "Ignoring invalid or duplicate alarm transition"
+                previous = ?prev,
+                current = ?(next_state, next_severity),
+                "Duplicate or non-actionable transition skipped"
             );
         } else {
             tracing::debug!(
@@ -90,7 +151,9 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         changed
     }
-    pub fn report(&mut self, alarm: Status) {
+
+    pub fn report(&mut self, mut alarm: Status) {
+    alarm.device = alarm.device.trim().to_uppercase();  
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
 
@@ -114,7 +177,7 @@ impl<P: Publisher> AlarmsReporter<P> {
 
             if self.handle_publish(message) {
                 let source = alarm.source();
-                let device = alarm.device.clone();
+let device = alarm.device.trim().to_uppercase();  
 
                 if cur_state == State::Ok {
                     if let Some(devices) = self.known_alarms.get_mut(&source) {
@@ -240,6 +303,7 @@ mod tests {
         let mut test_reporter = AlarmsReporter {
             controls_publisher: TestPub::init_throwing(),
             known_alarms: HashMap::new(),
+            command_state: HashMap::new(),
         };
 
         test_reporter.report(get_test_alarm(
@@ -325,6 +389,7 @@ mod tests {
 
     #[test]
     fn test_should_publish_logic() {
+
         let reporter = AlarmsReporter::<TestPub>::new();
 
         // New alarm should publish

@@ -1,44 +1,39 @@
 pub mod common {
     pub mod alarm {
-        include!(concat!(env!("OUT_DIR"), "/common.alarm.rs"));
+        tonic::include_proto!("common.alarm");
     }
 
     pub mod device {
-        include!(concat!(env!("OUT_DIR"), "/common.device.rs"));
+        tonic::include_proto!("common.device");
     }
 
     pub mod status {
-        include!(concat!(env!("OUT_DIR"), "/common.status.rs"));
-    }
-}
-
-pub mod services {
-    pub mod daq {
-        include!(concat!(env!("OUT_DIR"), "/services.daq.rs"));
-    }
-
-    pub mod devdb {
-        include!(concat!(env!("OUT_DIR"), "/services.devdb.rs"));
-    }
-
-    pub mod ioc_alarms {
-        include!(concat!(env!("OUT_DIR"), "/services.ioc_alarms.rs"));
+        tonic::include_proto!("common.status");
     }
 }
 
 pub mod google {
     pub mod protobuf {
-        include!(concat!(env!("OUT_DIR"), "/google.protobuf.rs"));
+        tonic::include_proto!("google.protobuf");
     }
 }
 
-// NOTE:
-// This file is central module for all protobuf-generated code.
-// tonic/prost generates many .rs files in OUT_DIR, but they are not part of
-// the crate automatically. proto.rs exposes them by including each file and
-// rebuilding the correct module tree (services.*, common.*, etc.).
-//
-// Without this file, modules like services.daq, services.devdb, and
-// common.device/common.status would not be visible, causing errors such as
-// “could not find `common` in super”. This structure is for consistent,
-// shared protobuf namespaces across DevDB, DAQ, and IOC clients.
+pub mod services {
+    pub mod devdb {
+        tonic::include_proto!("services.devdb");
+    }
+
+    pub mod daq {
+        tonic::include_proto!("services.daq");
+    }
+
+    pub mod ioc_alarms {
+        tonic::include_proto!("services.ioc_alarms");
+    }
+
+    pub mod alarm_commands {
+        pub mod v1 {
+            tonic::include_proto!("services.alarm_commands.v1");
+        }
+    }
+}

@@ -11,6 +11,9 @@ use crate::proto::google::protobuf::Timestamp;
 use crate::report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
 const ALARM_REDIS_STREAM_KEY: &str = "EPICS_ALARM_REDIS_KEY";
@@ -20,7 +23,7 @@ const DEFAULT_REDIS_PORT: &str = "6379";
 const DEFAULT_STREAM_KEY: &str = "acorn:alarms";
 
 pub async fn start_redis_reader(
-    reporter: &mut AlarmsReporter<KafkaPublisher>,
+    reporter: Arc<Mutex<AlarmsReporter<KafkaPublisher>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let host = env_var::get(ALARM_REDIS_HOST).or_else(|| DEFAULT_REDIS_HOST.to_string());
 
@@ -62,7 +65,7 @@ pub async fn start_redis_reader(
             Ok(Some(r)) => r,
             Ok(None) => continue,
             Err(e) => {
-                debug! (
+                debug!(
                     target = "redis_stream",
                     error = ?e,
                     "Redis XREAD timeout"
@@ -105,10 +108,11 @@ pub async fn start_redis_reader(
                     "Parsed alarm fields"
                 );
 
-                let status = build_status_from_redis(device.unwrap(), severity, state, source);
+                let device = device.unwrap().trim().to_uppercase();
 
-                // Publish via shared Kafka reporter
-                // Publish via Kafka reporter
+                let status = build_status_from_redis(device, severity, state, source);
+
+                let mut reporter = reporter.lock().await;
                 reporter.report(status);
 
                 last_id = entry.id.clone();
@@ -139,7 +143,7 @@ fn build_status_from_redis(
     };
 
     let state_enum = match state.unwrap_or_default().to_uppercase().as_str() {
-        "OK" => State::Ok,
+        "OK" | "NORMAL" => State::Ok,
         "ALARMED" | "ALARM" => State::Alarmed,
         "BYPASSED" => State::Bypassed,
         "LATCHED" => State::Latched,
