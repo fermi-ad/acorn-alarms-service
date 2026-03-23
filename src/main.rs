@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("gRPC server failed");
     });
 
-     tokio::spawn(start_redis_reader(reporter.clone()));
+    tokio::spawn(start_redis_reader(reporter.clone()));
 
     tokio::signal::ctrl_c().await?;
     Ok(())

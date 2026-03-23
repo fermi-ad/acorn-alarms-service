@@ -65,9 +65,9 @@ impl AlarmCommands for AlarmCommandsService {
 
         let mut reporter = self.reporter.lock().await;
 
-      for device in req.devices {
-    reporter.set_bypass(device);  
-}
+        for device in req.devices {
+            reporter.set_bypass(device);
+        }
 
         Ok(Response::new(Empty {}))
     }
@@ -79,15 +79,17 @@ impl AlarmCommands for AlarmCommandsService {
         let req = request.into_inner();
 
         tracing::info!(
-            "Snooze applied to devices: {:?}, duration: {}s",
+            "Snooze applied to devices: {:?}, wake: {:?}",
             req.devices,
-            req.duration_seconds
+            req.wake
         );
 
         let mut reporter = self.reporter.lock().await;
 
+        let wake = req.wake.clone().expect("wake timestamp is required");
+
         for device in req.devices {
-            reporter.set_snooze(device, req.duration_seconds);
+            reporter.set_snooze(device, wake.clone());
         }
 
         Ok(Response::new(Empty {}))

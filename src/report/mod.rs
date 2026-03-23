@@ -1,6 +1,9 @@
-use crate::proto::common::alarm::{
-    Status,
-    status::{Severity, Source, State},
+use crate::proto::{
+    common::alarm::{
+        Status,
+        status::{Severity, Source, State},
+    },
+    google::protobuf::Timestamp,
 };
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Message, Publisher};
@@ -11,6 +14,7 @@ use tracing::error;
 struct CommandState {
     bypassed: bool,
     snoozed_until: Option<std::time::SystemTime>,
+    wake: Option<Timestamp>,
 }
 
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
@@ -50,20 +54,42 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     pub fn set_bypass(&mut self, device: String) {
-    let device = device.trim().to_uppercase();   
+        let device = device.trim().to_uppercase();
 
-    let state = self.command_state.entry(device).or_default();
-    state.bypassed = true;
-}
+        let state = self.command_state.entry(device).or_default();
+        state.bypassed = true;
+    }
 
-    pub fn set_snooze(&mut self, device: String, duration_secs: i64) {
-    let device = device.trim().to_uppercase();  
+   pub fn set_snooze(&mut self, device: String, wake: Timestamp) {
+    let device = device.trim().to_uppercase();
 
-    let state = self.command_state.entry(device).or_default();
+    let key = device.clone(); 
 
-    state.snoozed_until = Some(
-        std::time::SystemTime::now() + std::time::Duration::from_secs(duration_secs as u64),
-    );
+    let state = self.command_state.entry(key).or_default();
+
+    let snooze_until = std::time::UNIX_EPOCH
+        + std::time::Duration::from_secs(wake.seconds as u64)
+        + std::time::Duration::from_nanos(wake.nanos as u64);
+
+    state.snoozed_until = Some(snooze_until);
+    state.wake = Some(wake.clone());
+
+    let status = Status {
+        device: device.clone(),   
+        severity: Severity::Unknown as i32,
+        state: State::Alarmed as i32,
+        source: 0,
+        acknowledgeable: false,
+        time: Some(Timestamp {
+            seconds: chrono::Utc::now().timestamp(),
+            nanos: 0,
+        }),
+        epics_type: String::default(),
+        user: String::default(),
+        wake: Some(wake),
+    };
+
+    self.report(status);
 }
     fn transition_allowed(prev: State, next: State) -> bool {
         matches!(
@@ -77,26 +103,26 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     fn should_publish(&self, alarm: &Status) -> bool {
-       let source = alarm.source();
-let device = alarm.device.trim().to_uppercase();
+        let source = alarm.source();
+        let device = alarm.device.trim().to_uppercase();
 
-    tracing::debug!(
-        target = "alarm_transition",
-        device = %device,
-        has_cmd = self.command_state.contains_key(&device),
-        "Checking command_state"
-    );
-
-if let Some(cmd) = self.command_state.get(&device) {
-    if cmd.bypassed {
         tracing::debug!(
             target = "alarm_transition",
             device = %device,
-            "Skipping alarm due to bypass"
+            has_cmd = self.command_state.contains_key(&device),
+            "Checking command_state"
         );
-        return false;  
-    }
-         if let Some(until) = cmd.snoozed_until {
+
+        if let Some(cmd) = self.command_state.get(&device) {
+            if cmd.bypassed {
+                tracing::debug!(
+                    target = "alarm_transition",
+                    device = %device,
+                    "Skipping alarm due to bypass"
+                );
+                return false;
+            }
+            if let Some(until) = cmd.snoozed_until {
                 if std::time::SystemTime::now() < until {
                     tracing::debug!(
                         target = "alarm_transition",
@@ -153,7 +179,7 @@ if let Some(cmd) = self.command_state.get(&device) {
     }
 
     pub fn report(&mut self, mut alarm: Status) {
-    alarm.device = alarm.device.trim().to_uppercase();  
+        alarm.device = alarm.device.trim().to_uppercase();
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
 
@@ -177,7 +203,7 @@ if let Some(cmd) = self.command_state.get(&device) {
 
             if self.handle_publish(message) {
                 let source = alarm.source();
-let device = alarm.device.trim().to_uppercase();  
+                let device = alarm.device.trim().to_uppercase();
 
                 if cur_state == State::Ok {
                     if let Some(devices) = self.known_alarms.get_mut(&source) {
@@ -389,7 +415,6 @@ mod tests {
 
     #[test]
     fn test_should_publish_logic() {
-
         let reporter = AlarmsReporter::<TestPub>::new();
 
         // New alarm should publish
