@@ -72,7 +72,7 @@ impl<P: Publisher> AlarmsReporter<P> {
             + std::time::Duration::from_nanos(wake.nanos as u64);
 
         state.snoozed_until = Some(snooze_until);
-        state.wake = Some(wake.clone());
+        state.wake = Some(wake);
 
         let status = Status {
             device: device.clone(),
@@ -115,22 +115,21 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         if let Some(cmd) = self.command_state.get(&device) {
             if cmd.bypassed {
+                tracing::debug!(target = "alarm_transition",
+                    device = %device,
+                    "Skipping alarm due to bypass");
+                return false;
+            }
+
+            if let Some(until) = cmd.snoozed_until
+                && std::time::SystemTime::now() < until
+            {
                 tracing::debug!(
                     target = "alarm_transition",
                     device = %device,
-                    "Skipping alarm due to bypass"
+                    "Skipping alarm due to snooze"
                 );
                 return false;
-            }
-            if let Some(until) = cmd.snoozed_until {
-                if std::time::SystemTime::now() < until {
-                    tracing::debug!(
-                        target = "alarm_transition",
-                        device = %device,
-                        "Skipping alarm due to snooze"
-                    );
-                    return false;
-                }
             }
         }
 
@@ -147,14 +146,11 @@ impl<P: Publisher> AlarmsReporter<P> {
             Some((prev_state, prev_severity)) => {
                 if *prev_state != next_state {
                     Self::transition_allowed(*prev_state, next_state)
-                } else if *prev_severity != next_severity {
-                    true
                 } else {
-                    false
+                    *prev_severity != next_severity
                 }
             }
         };
-
         if !changed {
             tracing::debug!(
                 target = "alarm_transition",
@@ -372,7 +368,7 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .is_none_or(|devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("DEVICE 2"))
         );
         assert_eq!(
             test_reporter

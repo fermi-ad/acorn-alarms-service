@@ -86,10 +86,10 @@ impl AlarmCommands for AlarmCommandsService {
 
         let mut reporter = self.reporter.lock().await;
 
-        let wake = req.wake.clone().expect("wake timestamp is required");
+        let wake = req.wake.expect("wake timestamp is required");
 
         for device in req.devices {
-            reporter.set_snooze(device, wake.clone());
+            reporter.set_snooze(device, wake);
         }
 
         Ok(Response::new(Empty {}))
