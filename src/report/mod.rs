@@ -60,37 +60,37 @@ impl<P: Publisher> AlarmsReporter<P> {
         state.bypassed = true;
     }
 
-   pub fn set_snooze(&mut self, device: String, wake: Timestamp) {
-    let device = device.trim().to_uppercase();
+    pub fn set_snooze(&mut self, device: String, wake: Timestamp) {
+        let device = device.trim().to_uppercase();
 
-    let key = device.clone(); 
+        let key = device.clone();
 
-    let state = self.command_state.entry(key).or_default();
+        let state = self.command_state.entry(key).or_default();
 
-    let snooze_until = std::time::UNIX_EPOCH
-        + std::time::Duration::from_secs(wake.seconds as u64)
-        + std::time::Duration::from_nanos(wake.nanos as u64);
+        let snooze_until = std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(wake.seconds as u64)
+            + std::time::Duration::from_nanos(wake.nanos as u64);
 
-    state.snoozed_until = Some(snooze_until);
-    state.wake = Some(wake.clone());
+        state.snoozed_until = Some(snooze_until);
+        state.wake = Some(wake.clone());
 
-    let status = Status {
-        device: device.clone(),   
-        severity: Severity::Unknown as i32,
-        state: State::Alarmed as i32,
-        source: 0,
-        acknowledgeable: false,
-        time: Some(Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
-            nanos: 0,
-        }),
-        epics_type: String::default(),
-        user: String::default(),
-        wake: Some(wake),
-    };
+        let status = Status {
+            device: device.clone(),
+            severity: Severity::Unknown as i32,
+            state: State::Alarmed as i32,
+            source: 0,
+            acknowledgeable: false,
+            time: Some(Timestamp {
+                seconds: chrono::Utc::now().timestamp(),
+                nanos: 0,
+            }),
+            epics_type: String::default(),
+            user: String::default(),
+            wake: Some(wake),
+        };
 
-    self.report(status);
-}
+        self.report(status);
+    }
     fn transition_allowed(prev: State, next: State) -> bool {
         matches!(
             (prev, next),
@@ -319,7 +319,7 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .is_none_or(|devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("DEVICE 2"))
         );
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
@@ -346,22 +346,22 @@ mod tests {
         let mut test_reporter = AlarmsReporter::<TestPub>::new();
 
         // Raise alarms for a subset of non contiguous devices
-        test_reporter.report(get_test_alarm("device 2", State::Alarmed, Source::Analog));
-        test_reporter.report(get_test_alarm("device 7", State::Alarmed, Source::Epics));
+        test_reporter.report(get_test_alarm("DEVICE 2", State::Alarmed, Source::Analog));
+        test_reporter.report(get_test_alarm("DEVICE 7", State::Alarmed, Source::Epics));
 
         assert!(
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
                 .unwrap()
-                .contains_key("device 2")
+                .contains_key("DEVICE 2")
         );
         assert!(
             test_reporter
                 .known_alarms
                 .get(&Source::Epics)
                 .unwrap()
-                .contains_key("device 7")
+                .contains_key("DEVICE 7")
         );
         assert_eq!(test_reporter.known_alarms.len(), 2);
 
@@ -379,7 +379,7 @@ mod tests {
                 .known_alarms
                 .get(&Source::Epics)
                 .unwrap()
-                .get("device 7"),
+                .get("DEVICE 7"),
             Some(&(State::Alarmed, Severity::Low))
         );
         assert_eq!(test_reporter.known_alarms.len(), 2);
@@ -399,7 +399,7 @@ mod tests {
                 .known_alarms
                 .get(&source)
                 .unwrap()
-                .get("test device"),
+                .get("TEST DEVICE"),
             Some(&(State::Alarmed, Severity::Low))
         );
     }
@@ -427,7 +427,7 @@ mod tests {
             .known_alarms
             .entry(Source::Analog)
             .or_default()
-            .insert("dev1".to_string(), (State::Ok, Severity::Low));
+            .insert("DEV1".to_string(), (State::Ok, Severity::Low));
 
         let same_alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
         assert!(!reporter.should_publish(&same_alarm));
