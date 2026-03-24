@@ -79,7 +79,7 @@ stateDiagram-v2
 
   ACKNOWLEDGED --> BYPASSED: Bypass
   ACKNOWLEDGED --> OK: Device ok
-  ACKNOWLEDGED --> ALARMED: Device alarm (Severity increased)
+  ACKNOWLEDGED --> ALARMED: Severity increased
 
   LATCHED --> BYPASSED: Bypass
   LATCHED --> OK: Acknowledge
