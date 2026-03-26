@@ -21,6 +21,7 @@ pub struct AlarmCommandsService {
 }
 
 pub fn handle_ack(reporter: &mut AlarmsReporter<KafkaPublisher>, device: String, user: String) {
+
     let status = Status {
         device,
         severity: Severity::Unknown as i32,
@@ -66,7 +67,7 @@ impl AlarmCommands for AlarmCommandsService {
         let mut reporter = self.reporter.lock().await;
 
         for device in req.devices {
-            reporter.set_bypass(device);
+            reporter.set_bypass(device, req.user.clone());
         }
 
         Ok(Response::new(Empty {}))
@@ -89,7 +90,7 @@ impl AlarmCommands for AlarmCommandsService {
         let wake = req.wake.expect("wake timestamp is required");
 
         for device in req.devices {
-            reporter.set_snooze(device, wake);
+            reporter.set_snooze(device, wake, req.user.clone());
         }
 
         Ok(Response::new(Empty {}))

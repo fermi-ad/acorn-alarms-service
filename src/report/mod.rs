@@ -14,7 +14,6 @@ use tracing::error;
 struct CommandState {
     bypassed: bool,
     snoozed_until: Option<std::time::SystemTime>,
-    wake: Option<Timestamp>,
 }
 
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
@@ -53,39 +52,57 @@ impl<P: Publisher> AlarmsReporter<P> {
         }
     }
 
-    pub fn set_bypass(&mut self, device: String) {
+    pub fn set_bypass(&mut self, device: String, user: String) {
         let device = device.trim().to_uppercase();
 
-        let state = self.command_state.entry(device).or_default();
+        let state = self.command_state.entry(device.clone()).or_default();
         state.bypassed = true;
+
+        let now = chrono::Utc::now();
+
+        let status = Status {
+            device,
+            severity: Severity::Unknown as i32,
+            state: State::Bypassed as i32,
+            source: Source::Unknown as i32,
+            acknowledgeable: false,
+            time: Some(Timestamp {
+                seconds: now.timestamp(),
+                nanos: now.timestamp_subsec_nanos() as i32,
+            }),
+            epics_type: String::default(),
+            user,
+            wake: None,
+        };
+
+        self.report(status);
     }
 
-    pub fn set_snooze(&mut self, device: String, wake: Timestamp) {
+    pub fn set_snooze(&mut self, device: String, wake: Timestamp, user: String) {
         let device = device.trim().to_uppercase();
 
-        let key = device.clone();
-
-        let state = self.command_state.entry(key).or_default();
+        let state = self.command_state.entry(device.clone()).or_default();
 
         let snooze_until = std::time::UNIX_EPOCH
             + std::time::Duration::from_secs(wake.seconds as u64)
             + std::time::Duration::from_nanos(wake.nanos as u64);
 
         state.snoozed_until = Some(snooze_until);
-        state.wake = Some(wake);
+
+        let now = chrono::Utc::now();
 
         let status = Status {
-            device: device.clone(),
+            device,
             severity: Severity::Unknown as i32,
             state: State::Alarmed as i32,
-            source: 0,
+            source: Source::Unknown as i32,
             acknowledgeable: false,
             time: Some(Timestamp {
-                seconds: chrono::Utc::now().timestamp(),
-                nanos: 0,
+                seconds: now.timestamp(),
+                nanos: now.timestamp_subsec_nanos() as i32,
             }),
             epics_type: String::default(),
-            user: String::default(),
+            user,
             wake: Some(wake),
         };
 
@@ -144,11 +161,8 @@ impl<P: Publisher> AlarmsReporter<P> {
         let changed = match prev {
             None => true,
             Some((prev_state, prev_severity)) => {
-                if *prev_state != next_state {
-                    Self::transition_allowed(*prev_state, next_state)
-                } else {
-                    *prev_severity != next_severity
-                }
+              Self::transition_allowed(*prev_state, next_state)
+    || *prev_severity != next_severity
             }
         };
         if !changed {
@@ -174,8 +188,8 @@ impl<P: Publisher> AlarmsReporter<P> {
         changed
     }
 
-    pub fn report(&mut self, mut alarm: Status) {
-        alarm.device = alarm.device.trim().to_uppercase();
+    pub fn report(&mut self, alarm: Status) {
+    
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
 
