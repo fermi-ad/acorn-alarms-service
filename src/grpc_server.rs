@@ -21,7 +21,6 @@ pub struct AlarmCommandsService {
 }
 
 pub fn handle_ack(reporter: &mut AlarmsReporter<KafkaPublisher>, device: String, user: String) {
-
     let status = Status {
         device,
         severity: Severity::Unknown as i32,

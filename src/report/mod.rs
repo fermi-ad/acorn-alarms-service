@@ -161,8 +161,7 @@ impl<P: Publisher> AlarmsReporter<P> {
         let changed = match prev {
             None => true,
             Some((prev_state, prev_severity)) => {
-              Self::transition_allowed(*prev_state, next_state)
-    || *prev_severity != next_severity
+                Self::transition_allowed(*prev_state, next_state) || *prev_severity != next_severity
             }
         };
         if !changed {
@@ -189,7 +188,6 @@ impl<P: Publisher> AlarmsReporter<P> {
     }
 
     pub fn report(&mut self, alarm: Status) {
-    
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
 
