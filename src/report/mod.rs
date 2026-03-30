@@ -94,7 +94,7 @@ impl<P: Publisher> AlarmsReporter<P> {
         let status = Status {
             device,
             severity: Severity::Unknown as i32,
-            state: State::Alarmed as i32,
+            state: State::Bypassed as i32,
             source: Source::Unknown as i32,
             acknowledgeable: false,
             time: Some(Timestamp {
