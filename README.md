@@ -6,7 +6,7 @@ A service that combines the alarms pathways for EPICS and ACNET, and provides a 
 
 ### Environment variables
 
-The following environment variables may be set to configure the associated system properties.
+The following environment variables may be set to configure the associated system properties:
 
 - `CONTROLS_ALARMS_TOPIC` -> Configures the name of the topic in the Controls Kafka instance that alarms will be published to
 - `CONTROLS_KAFKA_HOST` -> Configures the address of the Controls Kafka instance
@@ -18,6 +18,7 @@ The following environment variables may be set to configure the associated syste
 ## Development
 
 The following packages must be present on the host machine when building this application:
+
 - `cmake`
 - `libcurl4-openssl-dev`
 - `librdkafka-dev`
@@ -26,27 +27,7 @@ The following packages must be present on the host machine when building this ap
 
 ## Design
 
-### Startup
-
-- Determine the set of all device alarms
-  - Request all Devices having analog and/or digital alarms from an ACNET Device gRPC service
-  - Request all Devices (i.e. PV's) having value alarms from an EPICS Device gRPC service
-- If necessary, read the initial alarm state of every device alarm (TBD - we may get this for free by setting the listeners below)
-- Read the most recent information from Kafka for all device alarms
-  - Bypass state (EPICS only)
-  - Snooze stop time (ACNET and EPICS)
-  - Acknowledge state (ACNET and EPICS)
-- Begin listening to all device alarms via DPM/Data-Cache for changes to alarm state
-  - Devices should be divided into manageable subsets and listened to via multiple DRF requests (rather than one huge one)
-
-### Alarm Listening
-
-- Report changes of alarm states by adding records to a Kafka service
-- Monitor Kafka for changes from clients (ACORN or Phoebus)
-- Periodically re-request the set of all device alarms from Device gRPC service(s)
-- Cancel and re-issue alarm listening requests if device alarm set has changed
-
-### Device/Kafka Alarm States
+### Alarm States
 
 | State          | Description
 |----------------|------------
@@ -77,9 +58,9 @@ stateDiagram-v2
   ALARMED --> LATCHED: Device ok (Latching)
   ALARMED --> ACKNOWLEDGED: Acknowledge
 
+  ACKNOWLEDGED --> ALARMED: Severity increased
   ACKNOWLEDGED --> BYPASSED: Bypass
   ACKNOWLEDGED --> OK: Device ok
-  ACKNOWLEDGED --> ALARMED: Severity increased
 
   LATCHED --> BYPASSED: Bypass
   LATCHED --> OK: Acknowledge
@@ -91,47 +72,51 @@ stateDiagram-v2
   style ACKNOWLEDGED  fill:#FFF0F0
 ```
 
-### Kafka Schema
+### Alarm Status Cache
 
-A single Kafka topic shall be maintained for recording alarm state information. Keys shall be unique (non-duplicating messages) and shall record the most recent state for a given device alarm.
+A status cache shall be maintained within the service to track the current alarm states and provide context for state changes.  The status cache shall contain the same information as Kafka, where Kafka shall provide the persistence and source of truth for alarm status.
 
 #### Key
 
-The Key for a message shall be the device name, plus a suffix consisting of a '#' separator character and one of the possible Source values:
+The Key for a message shall be the `Device` name, plus a suffix consisting of a '#' separator character and one of the possible `Source` values:
+
 - "Analog"
 - "Digital"
 - "Epics"
 
-See [Example Kafka Records](#example-kafka-records) below.
+For example(s):
+
+- `G:AMANDA#Analog`
+- `Z:ACLTST#Digital`
+- `PIP2IT:pHB650_CRYO_TX103:TempK#Epics`
+
+This will ensure that an ACNET device can have distinct analog and digital alarms, while an EPICS device has a single alarm of a type that can vary.
 
 #### Value
 
-The Value for a message shall be a JSON string.
+The Value shall hold the following string fields:
 
-#### JSON Schema for Values
+| Name     | Contents
+|----------|------------
+| Device   | \<name of device without `Source` suffix>
+| Source   | "Analog" or "Digital" or "Epics"
+| Time     | \<seconds since epoch of change from user>
+| State    | "Ok" or "Alarmed" or "Bypassed" or "Latched" or "Acknowledged"
+| Severity | "None" or "Minor" or "Major"
+| Detail   | \<meaning depends on `Source` and `Severity` fields - see [Detail Field](#detail-field) below>
+| Ackable  | "True" or "False"
+| User     | \<name of user who changed state>
+| Wake     | \<seconds since epoch to wake from snooze>
 
-Refer also to https://github.com/fermi-ad/interface-definitions/blob/main/proto/controls/common/v1/alarm.proto
-```
-{
-  "Device"          : <name of device without Source suffix>    //  see Key above
-  "Source"          : "Analog" | "Digital" | "Epics"
-  "State"           : "Ok" | "Alarmed" | "Bypassed" | "Latched" | "Acknowledged"
-  "Severity"        : "Low" | "High"                            //  (optional)
-  "Acknowledgeable" : "True" | "False"                          //  (optional)
-  "Time"            : { "seconds":<int64>, "nanos":<int32> }    //  per gRPC Timestamp
-  "Detail"          : <uint32 meaning depends on Source field>  //  (optional)
-  "User"            : <name of user who changed state>          //  (optional)
-  "Wake"            : { "seconds":<int64>, "nanos":<int32> }    //  per gRPC Timestamp (optional)
-}
-```
+#### Detail Field
 
-#### Example Kafka Records
+The `Detail` field's data shall have different meanings depending on the `Source` and `State` fields:
 
-| Key | Value
-|-----|------
-| G:AMANDA#Analog | {<br>&emsp;"Device" : "G:AMANDA",<br>&emsp;"Source" : "Analog",<br>&emsp;"State" : "Bypassed",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;"User" : "Dave",<br>&emsp;"Wake" : { "seconds" : 2345, "nanos" : 6789 }<br>}
-| PIP2IT:pHB650_CRYO_TX103:TempK#Epics | {<br>&emsp;"Device" : "PIP2IT:pHB650_CRYO_TX103:TempK",<br>&emsp;"Source" : "Epics",<br>&emsp;"State" : "Alarmed",<br>&emsp;"Severity" : "Low",<br>&emsp;"Acknowledgeable" : "False",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 },<br>&emsp;"Detail" : 3<br>}
-| Z:ACLTST#Digital | {<br>&emsp;"Device" : "Z:ACLTST",<br>&emsp;"Source" : "Digital",<br>&emsp;"State" : "Alarmed",<br>&emsp;"Severity" : "High",<br>&emsp;"Acknowledgeable" : "True",<br>&emsp;"Time" : { "seconds" : 1234, "nanos" : 5678 }<br>&emsp;"Detail" : 1234<br>}
+| Source  | State                   | Detail              | Meaning
+|---------|-------------------------|---------------------|--------
+| Analog  | Alarmed or Acknowledged | Low or High         | The value is too low or too high
+| Digital | Alarmed or Acknowledged | \<raw data value>   | The raw value containing digital alarm bits
+| Epics   | Alarmed or Acknowledged | \<raw epics source> | The epics source value indicating the alarm type
 
 ### Alarm Configuration Info (Device DB)
 
@@ -142,6 +127,8 @@ There is information describing an alarm that is useful to users, but does not c
   - Latchable (Acknowledgeable)
 
 This information can change, but likely only infrequently.  A feasible update strategy for this information might be to query the Device DB for config data about an alarm whever a state change for that alarm is processed, with some throttle to prevent updates being too frequent (perhaps minimum 10 seconds between updates per device).
+
+Another strategy would be to only request DeviceDB info when an app requests alarm info for particular devices.  This would naturally limit database requests to a "human timescale", barring any highly parallel or automated clients (which we should protect against by also having a throttle per above).
 
 ### Public Interface (GraphQL)
 
