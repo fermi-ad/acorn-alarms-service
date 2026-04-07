@@ -130,16 +130,16 @@ impl<P: Publisher> AlarmsReporter<P> {
             "Checking command_state"
         );
 
-        if let Some(cmd) = self.command_state.get(&device) {
-            if cmd.bypassed {
-                tracing::debug!(
-                    target = "alarm_transition",
-                    device = %device,
-                    "Skipping alarm due to bypass"
-                );
-                return false;
-            }
-        }
+        if let Some(cmd) = self.command_state.get(&device)
+    && cmd.bypassed
+{
+    tracing::debug!(
+        target = "alarm_transition",
+        device = %device,
+        "Skipping alarm due to bypass"
+    );
+    return false;
+}
 
         let prev = self
             .known_alarms
