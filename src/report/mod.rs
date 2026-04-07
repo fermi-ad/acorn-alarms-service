@@ -132,19 +132,10 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         if let Some(cmd) = self.command_state.get(&device) {
             if cmd.bypassed {
-                tracing::debug!(target = "alarm_transition",
-                    device = %device,
-                    "Skipping alarm due to bypass");
-                return false;
-            }
-
-            if let Some(until) = cmd.snoozed_until
-                && std::time::SystemTime::now() < until
-            {
                 tracing::debug!(
                     target = "alarm_transition",
                     device = %device,
-                    "Skipping alarm due to snooze"
+                    "Skipping alarm due to bypass"
                 );
                 return false;
             }
