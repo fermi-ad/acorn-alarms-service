@@ -1,11 +1,20 @@
-use crate::proto::common::alarm::{
-    Status,
-    status::{Severity, Source, State},
+use crate::proto::{
+    common::alarm::{
+        Status,
+        status::{Severity, Source, State},
+    },
+    google::protobuf::Timestamp,
 };
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{Message, Publisher};
 use std::collections::HashMap;
 use tracing::error;
+
+#[derive(Debug, Default, Clone)]
+struct CommandState {
+    bypassed: bool,
+    snoozed_until: Option<std::time::SystemTime>,
+}
 
 const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
 const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
@@ -31,6 +40,7 @@ fn alarm_to_message(status: &Status, message_body: String) -> Message {
 pub struct AlarmsReporter<P: Publisher> {
     controls_publisher: P,
     known_alarms: HashMap<Source, HashMap<String, (State, Severity)>>,
+    command_state: HashMap<String, CommandState>,
 }
 
 impl<P: Publisher> AlarmsReporter<P> {
@@ -38,9 +48,66 @@ impl<P: Publisher> AlarmsReporter<P> {
         Self {
             controls_publisher: get_publisher(),
             known_alarms: HashMap::new(),
+            command_state: HashMap::new(),
         }
     }
 
+    pub fn set_bypass(&mut self, device: String, user: String) {
+        let device = device.trim().to_uppercase();
+
+        let state = self.command_state.entry(device.clone()).or_default();
+        state.bypassed = true;
+
+        let now = chrono::Utc::now();
+
+        let status = Status {
+            device,
+            severity: Severity::Unknown as i32,
+            state: State::Bypassed as i32,
+            source: Source::Unknown as i32,
+            acknowledgeable: false,
+            time: Some(Timestamp {
+                seconds: now.timestamp(),
+                nanos: now.timestamp_subsec_nanos() as i32,
+            }),
+            epics_type: String::default(),
+            user,
+            wake: None,
+        };
+
+        self.report(status);
+    }
+
+    pub fn set_snooze(&mut self, device: String, wake: Timestamp, user: String) {
+        let device = device.trim().to_uppercase();
+
+        let state = self.command_state.entry(device.clone()).or_default();
+
+        let snooze_until = std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(wake.seconds as u64)
+            + std::time::Duration::from_nanos(wake.nanos as u64);
+
+        state.snoozed_until = Some(snooze_until);
+
+        let now = chrono::Utc::now();
+
+        let status = Status {
+            device,
+            severity: Severity::Unknown as i32,
+            state: State::Bypassed as i32,
+            source: Source::Unknown as i32,
+            acknowledgeable: false,
+            time: Some(Timestamp {
+                seconds: now.timestamp(),
+                nanos: now.timestamp_subsec_nanos() as i32,
+            }),
+            epics_type: String::default(),
+            user,
+            wake: Some(wake),
+        };
+
+        self.report(status);
+    }
     fn transition_allowed(prev: State, next: State) -> bool {
         matches!(
             (prev, next),
@@ -48,34 +115,54 @@ impl<P: Publisher> AlarmsReporter<P> {
                 | (State::Alarmed, State::Acknowledged)
                 | (State::Alarmed, State::Ok)
                 | (State::Acknowledged, State::Ok)
+                | (State::Acknowledged, State::Alarmed)
         )
     }
 
     fn should_publish(&self, alarm: &Status) -> bool {
         let source = alarm.source();
-        let device = &alarm.device;
+        let device = alarm.device.trim().to_uppercase();
+
+        tracing::debug!(
+            target = "alarm_transition",
+            device = %device,
+            has_cmd = self.command_state.contains_key(&device),
+            "Checking command_state"
+        );
+
+        if let Some(cmd) = self.command_state.get(&device)
+            && cmd.bypassed
+        {
+            tracing::debug!(
+                target = "alarm_transition",
+                device = %device,
+                "Skipping alarm due to bypass"
+            );
+            return false;
+        }
 
         let prev = self
             .known_alarms
             .get(&source)
-            .and_then(|devices| devices.get(device));
+            .and_then(|devices| devices.get(&device));
 
         let next_state = alarm.state();
         let next_severity = alarm.severity();
 
         let changed = match prev {
             None => true,
-            Some((state, severity)) => {
-                Self::transition_allowed(*state, next_state) || *severity != next_severity
+            Some((prev_state, prev_severity)) => {
+                Self::transition_allowed(*prev_state, next_state) || *prev_severity != next_severity
             }
         };
-
         if !changed {
             tracing::debug!(
                 target = "alarm_transition",
                 device = %device,
                 source = ?source,
-                "Ignoring invalid or duplicate alarm transition"
+                previous = ?prev,
+                current = ?(next_state, next_severity),
+                "Duplicate or non-actionable transition skipped"
             );
         } else {
             tracing::debug!(
@@ -90,6 +177,7 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         changed
     }
+
     pub fn report(&mut self, alarm: Status) {
         let cur_state = alarm.state();
         let cur_severity = alarm.severity();
@@ -114,7 +202,7 @@ impl<P: Publisher> AlarmsReporter<P> {
 
             if self.handle_publish(message) {
                 let source = alarm.source();
-                let device = alarm.device.clone();
+                let device = alarm.device.trim().to_uppercase();
 
                 if cur_state == State::Ok {
                     if let Some(devices) = self.known_alarms.get_mut(&source) {
@@ -230,7 +318,7 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .is_none_or(|devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("DEVICE 2"))
         );
         assert!(test_reporter.controls_publisher.latest.is_some());
     }
@@ -240,6 +328,7 @@ mod tests {
         let mut test_reporter = AlarmsReporter {
             controls_publisher: TestPub::init_throwing(),
             known_alarms: HashMap::new(),
+            command_state: HashMap::new(),
         };
 
         test_reporter.report(get_test_alarm(
@@ -256,22 +345,22 @@ mod tests {
         let mut test_reporter = AlarmsReporter::<TestPub>::new();
 
         // Raise alarms for a subset of non contiguous devices
-        test_reporter.report(get_test_alarm("device 2", State::Alarmed, Source::Analog));
-        test_reporter.report(get_test_alarm("device 7", State::Alarmed, Source::Epics));
+        test_reporter.report(get_test_alarm("DEVICE 2", State::Alarmed, Source::Analog));
+        test_reporter.report(get_test_alarm("DEVICE 7", State::Alarmed, Source::Epics));
 
         assert!(
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
                 .unwrap()
-                .contains_key("device 2")
+                .contains_key("DEVICE 2")
         );
         assert!(
             test_reporter
                 .known_alarms
                 .get(&Source::Epics)
                 .unwrap()
-                .contains_key("device 7")
+                .contains_key("DEVICE 7")
         );
         assert_eq!(test_reporter.known_alarms.len(), 2);
 
@@ -282,14 +371,14 @@ mod tests {
             test_reporter
                 .known_alarms
                 .get(&Source::Analog)
-                .is_none_or(|devices| !devices.contains_key("device 2"))
+                .is_none_or(|devices| !devices.contains_key("DEVICE 2"))
         );
         assert_eq!(
             test_reporter
                 .known_alarms
                 .get(&Source::Epics)
                 .unwrap()
-                .get("device 7"),
+                .get("DEVICE 7"),
             Some(&(State::Alarmed, Severity::Low))
         );
         assert_eq!(test_reporter.known_alarms.len(), 2);
@@ -309,7 +398,7 @@ mod tests {
                 .known_alarms
                 .get(&source)
                 .unwrap()
-                .get("test device"),
+                .get("TEST DEVICE"),
             Some(&(State::Alarmed, Severity::Low))
         );
     }
@@ -337,7 +426,7 @@ mod tests {
             .known_alarms
             .entry(Source::Analog)
             .or_default()
-            .insert("dev1".to_string(), (State::Ok, Severity::Low));
+            .insert("DEV1".to_string(), (State::Ok, Severity::Low));
 
         let same_alarm = get_test_alarm("dev1", State::Ok, Source::Analog);
         assert!(!reporter.should_publish(&same_alarm));

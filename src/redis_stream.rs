@@ -11,6 +11,9 @@ use crate::proto::google::protobuf::Timestamp;
 use crate::report::AlarmsReporter;
 use rust_pubsub_lib::kafka_impl::KafkaPublisher;
 
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
 const ALARM_REDIS_STREAM_KEY: &str = "EPICS_ALARM_REDIS_KEY";
@@ -20,7 +23,7 @@ const DEFAULT_REDIS_PORT: &str = "6379";
 const DEFAULT_STREAM_KEY: &str = "acorn:alarms";
 
 pub async fn start_redis_reader(
-    reporter: &mut AlarmsReporter<KafkaPublisher>,
+    reporter: Arc<Mutex<AlarmsReporter<KafkaPublisher>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let host = env_var::get(ALARM_REDIS_HOST).or_else(|| DEFAULT_REDIS_HOST.to_string());
 
@@ -62,7 +65,7 @@ pub async fn start_redis_reader(
             Ok(Some(r)) => r,
             Ok(None) => continue,
             Err(e) => {
-                debug! (
+                debug!(
                     target = "redis_stream",
                     error = ?e,
                     "Redis XREAD timeout"
@@ -76,7 +79,6 @@ pub async fn start_redis_reader(
             for entry in stream.ids {
                 let device = map_to_string(&entry.map, "device");
                 let severity = map_to_string(&entry.map, "severity");
-                let state = map_to_string(&entry.map, "state");
                 let source = map_to_string(&entry.map, "source");
 
                 debug!(
@@ -100,16 +102,18 @@ pub async fn start_redis_reader(
                     target = "redis_stream",
                     device = ?device,
                     severity = ?severity,
-                    state = ?state,
                     source = ?source,
                     "Parsed alarm fields"
                 );
 
-                let status = build_status_from_redis(device.unwrap(), severity, state, source);
+                let device = device.unwrap().trim().to_uppercase();
 
-                // Publish via shared Kafka reporter
-                // Publish via Kafka reporter
-                reporter.report(status);
+                let status = build_status_from_redis(device, severity, source);
+
+                {
+                    let mut reporter = reporter.lock().await;
+                    reporter.report(status);
+                }
 
                 last_id = entry.id.clone();
             }
@@ -129,22 +133,21 @@ fn map_to_string(map: &std::collections::HashMap<String, Value>, key: &str) -> O
 fn build_status_from_redis(
     device: String,
     severity: Option<String>,
-    state: Option<String>,
     source: Option<String>,
 ) -> Status {
-    let severity_enum = match severity.unwrap_or_default().to_uppercase().as_str() {
+    let severity_str = severity.as_deref().unwrap_or("").to_uppercase();
+
+    let severity_enum = match severity_str.as_str() {
         "LOW" | "MINOR" => Severity::Low,
         "HIGH" | "MAJOR" => Severity::High,
+        "NO_ALARM" => Severity::Unknown,
         _ => Severity::Unknown,
     };
 
-    let state_enum = match state.unwrap_or_default().to_uppercase().as_str() {
-        "OK" => State::Ok,
-        "ALARMED" | "ALARM" => State::Alarmed,
-        "BYPASSED" => State::Bypassed,
-        "LATCHED" => State::Latched,
-        "ACKNOWLEDGED" | "ACK" => State::Acknowledged,
-        _ => State::Unknown,
+    let state_enum = if severity_str == "NO_ALARM" {
+        State::Ok
+    } else {
+        State::Alarmed
     };
 
     let source_enum = match source.unwrap_or_default().to_uppercase().as_str() {
