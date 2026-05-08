@@ -34,6 +34,7 @@ The following packages must be present on the host machine when building this ap
 | `OK`           | There is not an alarm
 | `ALARMED`      | There is an alarm
 | `BYPASSED`     | There may be an alarm but we are ignoring it
+| `UNBYPASSED`   | We are waiting for device state after bypass removed
 | `ACKNOWLEDGED` | There is an alarm but user has acknowledged it
 | `LATCHED`      | There was an alarm but no user acknowledged it
 
@@ -42,6 +43,8 @@ The following packages must be present on the host machine when building this ap
 - Kafka is source of truth for bypass (EPICS)
 - Kafka is source of truth for acknowledge (ACNET and EPICS)
 - Complete alarm state information can always be read from Kafka
+- EPICS will update device state during bypass (must cache)
+- ACNET will update device state after bypass is cleared
 
 ### Server State Transitions
 
@@ -50,8 +53,10 @@ stateDiagram-v2
   OK --> BYPASSED: Bypass
   OK --> ALARMED: Device alarm
 
-  BYPASSED --> OK: Unbypass (Device ok)
-  BYPASSED --> ALARMED: Unbypass (Device alarm)
+  BYPASSED --> UNBYPASSED: Unbypass
+
+  UNBYPASSED --> OK: Device ok
+  UNBYPASSED --> ALARMED: Device alarm
 
   ALARMED --> BYPASSED: Bypass
   ALARMED --> OK: Device ok (Not latching)
@@ -72,9 +77,17 @@ stateDiagram-v2
   style ACKNOWLEDGED  fill:#FFF0F0
 ```
 
+### Setting Bypass / Clearing Bypass
+
+ACNET devices must be told to enter bypass via a DRF request, and must be told to clear bypass via a DRF request.  EPICS do not know about bypass, so they should ignore the requests if they get them.
+
+### Device State Cache
+
+A device state cache shall be maintained within the service to track the device state during bypass, so that an EPICS device may be returned to the correct state after bypass is cleared (alternatively we may query the device).  EPICS devices will update us during bypass, but ACNET devices will update us after bypass is cleared.
+
 ### Alarm Status Cache
 
-A status cache shall be maintained within the service to track the current alarm states and provide context for state changes.  The status cache shall contain the same information as Kafka, where Kafka shall provide the persistence and source of truth for alarm status.
+An alarm status cache shall be maintained within the service to track the current alarm states and provide context for state changes.  The status cache shall contain the same information as Kafka, where Kafka shall provide the persistence and source of truth for alarm status.
 
 #### Key
 
