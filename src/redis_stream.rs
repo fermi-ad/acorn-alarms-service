@@ -1,6 +1,9 @@
+use chrono::Utc;
 use redis::{Value, streams::StreamReadReply};
 use rust_env_var_lib::env_var;
-use std::error::Error;
+use rust_pubsub_lib::kafka_impl::KafkaPublisher;
+use std::{collections::HashMap, error::Error, sync::Arc, time::Duration};
+use tokio::{sync::Mutex, time::sleep};
 use tracing::{debug, warn};
 
 use crate::proto::common::alarm::{
@@ -9,10 +12,6 @@ use crate::proto::common::alarm::{
 };
 use crate::proto::google::protobuf::Timestamp;
 use crate::report::AlarmsReporter;
-use rust_pubsub_lib::kafka_impl::KafkaPublisher;
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 const ALARM_REDIS_HOST: &str = "EPICS_ALARM_REDIS_HOST";
 const ALARM_REDIS_PORT: &str = "EPICS_ALARM_REDIS_PORT";
@@ -70,7 +69,7 @@ pub async fn start_redis_reader(
                     error = ?e,
                     "Redis XREAD timeout"
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                sleep(Duration::from_secs(2)).await;
                 continue;
             }
         };
@@ -121,7 +120,7 @@ pub async fn start_redis_reader(
     }
 }
 
-fn map_to_string(map: &std::collections::HashMap<String, Value>, key: &str) -> Option<String> {
+fn map_to_string(map: &HashMap<String, Value>, key: &str) -> Option<String> {
     map.get(key).and_then(|v| match v {
         Value::BulkString(bytes) => Some(String::from_utf8_lossy(bytes).to_string()),
         Value::SimpleString(s) => Some(s.clone()),
@@ -164,7 +163,7 @@ fn build_status_from_redis(
         source: source_enum as i32,
         acknowledgeable: false,
         time: Some(Timestamp {
-            seconds: chrono::Utc::now().timestamp(),
+            seconds: Utc::now().timestamp(),
             nanos: 0,
         }),
         epics_type: String::default(),

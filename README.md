@@ -79,6 +79,8 @@ stateDiagram-v2
 
 ### Setting Bypass / Clearing Bypass
 
+Bypass and unbypass (activate) operations are **source-specific**: each operation targets a single `DEVICE#Source` pair (e.g. `"M:BEAM#Analog"`).  Bypassing one source for a device does not suppress alarms from other sources for the same device.
+
 ACNET devices must be told to enter bypass via a DRF request, and must be told to clear bypass via a DRF request.  EPICS do not know about bypass, so they should ignore the requests if they get them.
 
 ### Device State Cache
