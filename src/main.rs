@@ -3,8 +3,11 @@ mod proto;
 mod redis_stream;
 mod report;
 
+#[cfg(test)]
+mod test_utils;
+
 use crate::grpc_server::AlarmCommandsService;
-use crate::proto::services::alarm_commands::v1::alarm_commands_server::AlarmCommandsServer;
+use crate::proto::services::alarm_commands::alarm_commands_server::AlarmCommandsServer;
 use crate::redis_stream::start_redis_reader;
 
 use report::AlarmsReporter;
