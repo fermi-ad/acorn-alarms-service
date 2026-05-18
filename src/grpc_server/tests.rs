@@ -16,7 +16,7 @@ use crate::{
 
 fn make_service() -> AlarmCommandsService<TestPub> {
     AlarmCommandsService {
-        reporter: Arc::new(Mutex::new(AlarmsReporter::<TestPub>::new())),
+        reporter: Arc::new(Mutex::new(AlarmsReporter::new(TestPub::init()))),
     }
 }
 
@@ -45,8 +45,12 @@ async fn acknowledge_calls_report_for_each_device_source() {
     // transition is allowed.  The devices field uses DEVICE#Source format.
     {
         let mut reporter = svc.reporter.lock().await;
-        reporter.report(alarmed_status("M:BEAM", Source::Analog));
-        reporter.report(alarmed_status("M:OUTTUNE", Source::Analog));
+        reporter
+            .report(alarmed_status("M:BEAM", Source::Analog))
+            .await;
+        reporter
+            .report(alarmed_status("M:OUTTUNE", Source::Analog))
+            .await;
     }
 
     let req = Request::new(AcknowledgeRequest {
@@ -106,7 +110,9 @@ async fn get_snapshot_returns_reporter_snapshot() {
     // Pre-populate via bypass so there is something in the snapshot
     {
         let mut reporter = svc.reporter.lock().await;
-        reporter.set_bypass("M:BEAM#Analog".to_string(), "operator".to_string());
+        reporter
+            .set_bypass("M:BEAM#Analog".to_string(), "operator".to_string())
+            .await;
     }
 
     let req = Request::new(Empty {});
@@ -125,7 +131,9 @@ async fn activate_removes_bypass_and_publishes_unbypassed() {
     // First bypass the device-source
     {
         let mut reporter = svc.reporter.lock().await;
-        reporter.set_bypass("M:BEAM#Analog".to_string(), "operator".to_string());
+        reporter
+            .set_bypass("M:BEAM#Analog".to_string(), "operator".to_string())
+            .await;
     }
 
     // Now activate (remove bypass) for the same device-source
@@ -150,8 +158,12 @@ async fn bypass_on_one_source_does_not_affect_other_sources() {
     // Pre-populate M:BEAM with an Analog alarm
     {
         let mut reporter = svc.reporter.lock().await;
-        reporter.report(alarmed_status("M:BEAM", Source::Analog));
-        reporter.report(alarmed_status("M:BEAM", Source::Digital));
+        reporter
+            .report(alarmed_status("M:BEAM", Source::Analog))
+            .await;
+        reporter
+            .report(alarmed_status("M:BEAM", Source::Digital))
+            .await;
     }
 
     // Bypass only the Analog source

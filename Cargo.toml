@@ -4,19 +4,22 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chrono = "0.4.43"
+chrono = "0.4.44"
 prost = "0.14.3"
-rust-env-var-lib = { git = "https://github.com/fermi-ad/rust-env-var-lib.git", tag = "v1.1.0" }
-rust-pubsub-lib = { git = "https://github.com/fermi-ad/rust-pubsub-lib.git", tag = "v4.0.1" }
-redis = { version = "1.0", features = ["tokio-comp"] }
+rust-env-var-lib = { git = "https://github.com/fermi-ad/rust-env-var-lib.git", tag = "v1.2.0" }
+rust-pubsub-lib = { git = "https://github.com/fermi-ad/rust-pubsub-lib.git", tag = "v8.0.0", features = ["kafka", "redis-stream"] }
+tokio-stream = "0.1.18"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tokio = { version = "1.49.0", features = ["rt-multi-thread","macros", "signal"] }
-tonic = "0.14.4"
-tonic-prost = "0.14.4"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "signal"] }
+tonic = "0.14.6"
+tonic-prost = "0.14.6"
 tracing = "0.1.44"
-tracing-subscriber = "0.3.22"
+tracing-subscriber = "0.3.23"
 
 [build-dependencies]
 protoc-bin-vendored = "3.2"
-tonic-prost-build = "0.14.4"
+tonic-prost-build = "0.14.6"
+
+[dev-dependencies]
+rust-pubsub-lib = { git = "https://github.com/fermi-ad/rust-pubsub-lib.git", tag = "v8.0.0", features = ["kafka", "redis-stream", "testing-utils"] }

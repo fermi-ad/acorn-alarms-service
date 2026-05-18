@@ -1,3 +1,17 @@
+use std::sync::Arc;
+
+use grpc_server::AlarmCommandsService;
+use proto::services::alarm_commands::alarm_commands_server::AlarmCommandsServer;
+use report::AlarmsReporter;
+
+use rust_env_var_lib::env_var;
+use rust_pubsub_lib::{Publisher, kafka_impl::KafkaPublisher};
+use tokio::signal;
+use tokio::spawn;
+use tokio::sync::Mutex;
+use tonic::transport::Server;
+use tracing::{Level, error, info, warn};
+
 mod grpc_server;
 mod proto;
 mod redis_stream;
@@ -6,18 +20,11 @@ mod report;
 #[cfg(test)]
 mod test_utils;
 
-use crate::grpc_server::AlarmCommandsService;
-use crate::proto::services::alarm_commands::alarm_commands_server::AlarmCommandsServer;
-use crate::redis_stream::start_redis_reader;
+const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
+const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
 
-use report::AlarmsReporter;
-use rust_pubsub_lib::kafka_impl::KafkaPublisher;
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-use tonic::transport::Server;
-use tracing::{Level, info};
+const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
+const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,14 +40,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Acorn Alarms Service starting…");
 
-    let reporter = Arc::new(Mutex::new(AlarmsReporter::<KafkaPublisher>::new()));
+    let reporter = Arc::new(Mutex::new(AlarmsReporter::new(get_kafka_publisher())));
 
     let grpc_service = AlarmCommandsService {
         reporter: reporter.clone(),
     };
 
     // Start gRPC server
-    tokio::spawn(async move {
+    spawn(async move {
         info!("Starting gRPC server on port 50051");
 
         Server::builder()
@@ -50,8 +57,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("gRPC server failed");
     });
 
-    tokio::spawn(start_redis_reader(reporter.clone()));
+    spawn(async move {
+        loop {
+            match redis_stream::start_redis_reader(reporter.clone()).await {
+                Ok(()) => warn!("Redis stream ended unexpectedly — reconnecting"),
+                Err(err) => error!("Redis stream error — reconnecting\n{err}"),
+            }
+        }
+    });
 
-    tokio::signal::ctrl_c().await?;
+    signal::ctrl_c().await?;
     Ok(())
+}
+
+fn get_kafka_publisher() -> KafkaPublisher {
+    let host = env_var::get(CONTROLS_KAFKA_HOST).or_else(|| DEFAULT_CONTROLS_HOST.to_string());
+
+    let topic = env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
+
+    KafkaPublisher::new(host, topic)
 }

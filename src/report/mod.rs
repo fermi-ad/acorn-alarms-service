@@ -18,8 +18,7 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use rust_env_var_lib::env_var;
-use rust_pubsub_lib::{Message, Publisher};
+use rust_pubsub_lib::{Message, Publisher, StringMessage};
 use tracing::{debug, error, warn};
 
 use crate::proto::{
@@ -31,13 +30,10 @@ use crate::proto::{
 };
 
 #[cfg(test)]
+mod integration_tests;
+
+#[cfg(test)]
 mod tests;
-
-const CONTROLS_KAFKA_HOST: &str = "CONTROLS_KAFKA_HOST";
-const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092";
-
-const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
-const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
 /// Tracks the live alarm state for all devices and publishes state changes to
 /// Kafka.
@@ -79,13 +75,14 @@ pub struct AlarmsReporter<P: Publisher> {
 }
 
 impl<P: Publisher> AlarmsReporter<P> {
-    /// Creates a new reporter, connecting to the Kafka broker and topic
-    /// specified by the `CONTROLS_KAFKA_HOST` and `CONTROLS_ALARMS_TOPIC`
-    /// environment variables (falling back to built-in defaults when those
-    /// variables are absent).
-    pub fn new() -> Self {
+    /// Creates a new reporter backed by the given `controls_publisher`.
+    ///
+    /// The caller is responsible for constructing the publisher with the
+    /// appropriate broker host and topic (see [`main`](crate) for the
+    /// production wiring via [`get_kafka_publisher`](crate::get_kafka_publisher)).
+    pub fn new(controls_publisher: P) -> Self {
         Self {
-            controls_publisher: get_publisher(),
+            controls_publisher,
             known_alarms: HashMap::new(),
         }
     }
@@ -138,10 +135,10 @@ impl<P: Publisher> AlarmsReporter<P> {
     /// `wake: None`.
     ///
     /// This is the inverse of [`set_active`](AlarmsReporter::set_active).
-    pub fn set_bypass(&mut self, device_source: String, user: String) {
+    pub async fn set_bypass(&mut self, device_source: String, user: String) {
         let key = Key::from(device_source.as_str());
 
-        self.apply_inactive_state(key, user, None);
+        self.apply_inactive_state(key, user, None).await;
     }
 
     /// Snoozes a specific `DEVICE#Source` until the given `wake` time.
@@ -176,10 +173,10 @@ impl<P: Publisher> AlarmsReporter<P> {
     /// `wake: Some(timestamp)`.
     ///
     /// This is the inverse of [`set_active`](AlarmsReporter::set_active).
-    pub fn set_snooze(&mut self, device_source: String, wake: Timestamp, user: String) {
+    pub async fn set_snooze(&mut self, device_source: String, wake: Timestamp, user: String) {
         let key = Key::from(device_source.as_str());
 
-        self.apply_inactive_state(key, user, Some(wake));
+        self.apply_inactive_state(key, user, Some(wake)).await;
     }
 
     /// Removes a bypass or snooze from a specific `DEVICE#Source` and
@@ -217,7 +214,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     ///
     /// This is the inverse of [`set_bypass`](AlarmsReporter::set_bypass) and
     /// [`set_snooze`](AlarmsReporter::set_snooze).
-    pub fn set_active(&mut self, device_source: String, user: String) {
+    pub async fn set_active(&mut self, device_source: String, user: String) {
         let key = Key::from(device_source.as_str());
         let now = chrono::Utc::now();
         let new_time = Some(Timestamp {
@@ -239,7 +236,7 @@ impl<P: Publisher> AlarmsReporter<P> {
                 unbypassed.wake = None;
                 match serde_json::to_string(&unbypassed) {
                     Ok(body) => {
-                        if self.handle_publish(alarm_to_message(&key, body)) {
+                        if self.handle_publish(alarm_to_message(&key, body)).await {
                             // Publish confirmed — now remove the entry from the cache.
                             self.known_alarms.remove(&key);
                         }
@@ -288,7 +285,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     ///
     /// This mirrors the structure of [`set_bypass`](AlarmsReporter::set_bypass):
     /// the domain logic lives on the reporter rather than in the gRPC handler.
-    pub fn set_acknowledged(&mut self, device_source: String, user: String) {
+    pub async fn set_acknowledged(&mut self, device_source: String, user: String) {
         let key = Key::from(device_source.as_str());
 
         let now = Utc::now();
@@ -325,7 +322,7 @@ impl<P: Publisher> AlarmsReporter<P> {
                     return;
                 }
             };
-            if self.handle_publish(message) {
+            if self.handle_publish(message).await {
                 self.known_alarms.insert(key, updated);
             }
         } else {
@@ -338,7 +335,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     ///
     /// The cache is updated **only after** a successful Kafka publish so that
     /// `known_alarms` mirrors confirmed Kafka state rather than attempted state.
-    pub fn report(&mut self, alarm: Status) {
+    pub async fn report(&mut self, alarm: Status) {
         if self.should_publish(&alarm) {
             let message_body = match serde_json::to_string(&alarm) {
                 Ok(body) => body,
@@ -356,11 +353,11 @@ impl<P: Publisher> AlarmsReporter<P> {
             debug!(target = "kafka", payload = %message_body, "Kafka payload");
 
             let key = Key::from(&alarm);
-            let message: Message = alarm_to_message(&key, message_body);
+            let message = alarm_to_message(&key, message_body);
 
             // Only update the cache after a successful Kafka publish so that
             // known_alarms mirrors confirmed Kafka state.
-            if self.handle_publish(message) {
+            if self.handle_publish(message).await {
                 if alarm.state() == State::Ok {
                     self.known_alarms.remove(&key);
                 } else {
@@ -391,7 +388,7 @@ impl<P: Publisher> AlarmsReporter<P> {
     /// method always writes that entry on success, a single key lookup in
     /// `should_publish` is sufficient to suppress subsequent alarms on that
     /// specific source.
-    fn apply_inactive_state(&mut self, key: Key, user: String, wake: Option<Timestamp>) {
+    async fn apply_inactive_state(&mut self, key: Key, user: String, wake: Option<Timestamp>) {
         let now = Utc::now();
         let new_time = Some(Timestamp {
             seconds: now.timestamp(),
@@ -425,7 +422,7 @@ impl<P: Publisher> AlarmsReporter<P> {
 
         // Only update the cache after a successful Kafka publish so that
         // known_alarms mirrors confirmed Kafka state.
-        if self.handle_publish(message) {
+        if self.handle_publish(message).await {
             // Replace any existing entry for this (device, source) pair with
             // the bypass record.  Other sources for the same device are
             // unaffected.
@@ -507,15 +504,16 @@ impl<P: Publisher> AlarmsReporter<P> {
         changed
     }
 
-    fn handle_publish(&mut self, message: Message) -> bool {
-        let key = message.key.clone();
+    async fn handle_publish(&mut self, message: StringMessage) -> bool {
+        let message_key = message.key_ref().map(|k| k.to_string());
         self.controls_publisher
             .publish(message)
+            .await
             .inspect_err(|err| {
                 error!(
                     target = "kafka",
                     error = ?err,
-                    key = ?key,
+                    key = ?message_key,
                     "Kafka publish failed"
                 )
             })
@@ -607,22 +605,11 @@ impl std::fmt::Display for Key {
     }
 }
 
-fn get_publisher<P: Publisher>() -> P {
-    let host = env_var::get(CONTROLS_KAFKA_HOST).or_else(|| DEFAULT_CONTROLS_HOST.to_string());
-
-    let topic = env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
-
-    P::new(host, topic)
-}
-
 /// Wraps a serialized alarm payload in a [`Message`] ready for publishing.
 ///
 /// The message key is the [`Key`] string representation of the alarm
 /// (`"DEVICE#SourceVariant"`), which lets downstream consumers identify which
 /// alarm a Kafka message belongs to without deserializing the body.
-fn alarm_to_message(key: &Key, message_body: String) -> Message {
-    Message {
-        key: Some(key.to_string()),
-        value: message_body,
-    }
+fn alarm_to_message(key: &Key, message_body: String) -> StringMessage {
+    StringMessage::new(Some(key.to_string()), message_body)
 }
