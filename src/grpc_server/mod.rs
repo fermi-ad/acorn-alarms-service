@@ -36,7 +36,7 @@ impl<P: Publisher + Send + Sync + 'static> AlarmCommands for AlarmCommandsServic
         let mut reporter = self.reporter.lock().await;
 
         for device in req.devices {
-            reporter.set_acknowledged(device, req.user.clone());
+            reporter.set_acknowledged(device, req.user.clone()).await;
         }
 
         Ok(Response::new(Empty {}))
@@ -56,7 +56,7 @@ impl<P: Publisher + Send + Sync + 'static> AlarmCommands for AlarmCommandsServic
         let mut reporter = self.reporter.lock().await;
 
         for device in req.devices {
-            reporter.set_active(device, req.user.clone());
+            reporter.set_active(device, req.user.clone()).await;
         }
 
         Ok(Response::new(Empty {}))
@@ -72,7 +72,7 @@ impl<P: Publisher + Send + Sync + 'static> AlarmCommands for AlarmCommandsServic
         let mut reporter = self.reporter.lock().await;
 
         for device in req.devices {
-            reporter.set_bypass(device, req.user.clone());
+            reporter.set_bypass(device, req.user.clone()).await;
         }
 
         Ok(Response::new(Empty {}))
@@ -97,7 +97,7 @@ impl<P: Publisher + Send + Sync + 'static> AlarmCommands for AlarmCommandsServic
         let mut reporter = self.reporter.lock().await;
 
         for device in req.devices {
-            reporter.set_snooze(device, wake, req.user.clone());
+            reporter.set_snooze(device, wake, req.user.clone()).await;
         }
 
         Ok(Response::new(Empty {}))

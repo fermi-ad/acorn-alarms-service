@@ -1,9 +1,7 @@
 //! Tests for the report module.
 
 use super::*;
-use crate::proto::{common::alarm::status::Severity, google::protobuf::Timestamp};
 use crate::test_utils::TestPub;
-use rust_pubsub_lib::kafka_impl::KafkaPublisher;
 
 fn get_test_alarm(device: &str, state: State, source: Source) -> Status {
     Status {
@@ -22,37 +20,29 @@ fn get_test_alarm(device: &str, state: State, source: Source) -> Status {
     }
 }
 
-#[test]
-fn call_alarms_reporter_new_with_kafka_publisher() {
-    let result = AlarmsReporter::<KafkaPublisher>::new();
-    assert_eq!(HashMap::new(), result.known_alarms);
+#[tokio::test]
+async fn report_alarm_not_active() {
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
+
+    test_reporter
+        .report(get_test_alarm(
+            "TEST DEVICE",
+            State::Alarmed,
+            Source::Analog,
+        ))
+        .await;
+
+    test_reporter
+        .report(get_test_alarm("DEVICE 2", State::Ok, Source::Analog))
+        .await;
+
+    let output = test_reporter.get_snapshot();
+    assert!(output.iter().all(|status| status.device != "DEVICE 2"));
+    assert!(test_reporter.controls_publisher.get_latest().is_some());
 }
 
-#[test]
-fn report_alarm_not_active() {
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
-
-    let key = Key {
-        device: "TEST DEVICE".to_string(),
-        source: Source::Analog,
-    };
-    test_reporter.known_alarms.insert(
-        key,
-        get_test_alarm("TEST DEVICE", State::Alarmed, Source::Analog),
-    );
-
-    test_reporter.report(get_test_alarm("DEVICE 2", State::Ok, Source::Analog));
-
-    let key2 = Key {
-        device: "DEVICE 2".to_string(),
-        source: Source::Analog,
-    };
-    assert!(!test_reporter.known_alarms.contains_key(&key2));
-    assert!(test_reporter.controls_publisher.latest.is_some());
-}
-
-#[test]
-fn report_does_not_update_cache_on_publish_failure() {
+#[tokio::test]
+async fn report_does_not_update_cache_on_publish_failure() {
     // When the Kafka publish fails, the cache must remain unchanged so that
     // the next incoming update can retry the transition.
     let mut test_reporter = AlarmsReporter {
@@ -62,17 +52,17 @@ fn report_does_not_update_cache_on_publish_failure() {
 
     let test_alarm = get_test_alarm("TEST DEVICE", State::Alarmed, Source::Digital);
     let test_key = Key::from(&test_alarm);
-    test_reporter.report(test_alarm);
+    test_reporter.report(test_alarm).await;
     // Publish failed → cache must NOT contain the new alarm.
     assert!(!test_reporter.known_alarms.contains_key(&test_key));
-    assert!(test_reporter.controls_publisher.latest.is_none());
+    assert!(test_reporter.controls_publisher.get_latest().is_none());
 }
 
-#[test]
-fn set_bypass_does_not_update_cache_on_publish_failure() {
+#[tokio::test]
+async fn set_bypass_does_not_update_cache_on_publish_failure() {
     // When the Kafka publish fails, the cache must remain unchanged:
     // the existing real-source entry must NOT be replaced by the bypass record.
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     // Pre-populate a real-source alarm.
     let analog_key = Key {
@@ -86,7 +76,9 @@ fn set_bypass_does_not_update_cache_on_publish_failure() {
 
     // Switch to a throwing publisher so the bypass publish fails.
     test_reporter.controls_publisher = TestPub::init_throwing();
-    test_reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    test_reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // The entry must still be Alarmed, not replaced by a Bypassed record.
     let entry = test_reporter
@@ -100,11 +92,11 @@ fn set_bypass_does_not_update_cache_on_publish_failure() {
     );
 }
 
-#[test]
-fn set_acknowledged_does_not_update_cache_on_publish_failure() {
+#[tokio::test]
+async fn set_acknowledged_does_not_update_cache_on_publish_failure() {
     // When the Kafka publish fails, the cache entries must remain in their
     // original state (Alarmed), not be mutated to Acknowledged.
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     // Pre-populate an alarmed device.
     let key = Key {
@@ -118,7 +110,9 @@ fn set_acknowledged_does_not_update_cache_on_publish_failure() {
 
     // Switch to a throwing publisher so the acknowledge publish fails.
     test_reporter.controls_publisher = TestPub::init_throwing();
-    test_reporter.set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string());
+    test_reporter
+        .set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Cache entry must still be Alarmed, not Acknowledged.
     let entry = test_reporter
@@ -132,11 +126,11 @@ fn set_acknowledged_does_not_update_cache_on_publish_failure() {
     );
 }
 
-#[test]
-fn set_active_does_not_remove_sentinel_on_publish_failure() {
+#[tokio::test]
+async fn set_active_does_not_remove_sentinel_on_publish_failure() {
     // When the Kafka publish fails, the bypass entry must remain in the
     // cache so that the source stays suppressed and the next attempt can retry.
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     // Pre-populate a bypass entry directly (source: Analog, state: Bypassed).
     let bypass_key = Key {
@@ -150,7 +144,9 @@ fn set_active_does_not_remove_sentinel_on_publish_failure() {
 
     // Switch to a throwing publisher so the unbypassed publish fails.
     test_reporter.controls_publisher = TestPub::init_throwing();
-    test_reporter.set_active("DEVICE A#Analog".to_string(), "operator".to_string());
+    test_reporter
+        .set_active("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Bypass entry must still be present — publish failed, cache unchanged.
     assert!(
@@ -159,13 +155,17 @@ fn set_active_does_not_remove_sentinel_on_publish_failure() {
     );
 }
 
-#[test]
-fn handles_subset_of_devices_independently() {
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn handles_subset_of_devices_independently() {
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     // Raise alarms for a subset of non contiguous devices
-    test_reporter.report(get_test_alarm("DEVICE 2", State::Alarmed, Source::Analog));
-    test_reporter.report(get_test_alarm("DEVICE 7", State::Alarmed, Source::Epics));
+    test_reporter
+        .report(get_test_alarm("DEVICE 2", State::Alarmed, Source::Analog))
+        .await;
+    test_reporter
+        .report(get_test_alarm("DEVICE 7", State::Alarmed, Source::Epics))
+        .await;
 
     let key2 = Key {
         device: "DEVICE 2".to_string(),
@@ -181,7 +181,9 @@ fn handles_subset_of_devices_independently() {
     assert_eq!(test_reporter.known_alarms.len(), 2);
 
     // Clear alarm for only one device
-    test_reporter.report(get_test_alarm("DEVICE 2", State::Ok, Source::Analog));
+    test_reporter
+        .report(get_test_alarm("DEVICE 2", State::Ok, Source::Analog))
+        .await;
 
     assert!(!test_reporter.known_alarms.contains_key(&key2));
 
@@ -192,12 +194,14 @@ fn handles_subset_of_devices_independently() {
     assert_eq!(test_reporter.known_alarms.len(), 1);
 }
 
-#[test]
-fn report_new_alarm() {
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn report_new_alarm() {
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     let source = Source::Analog;
-    test_reporter.report(get_test_alarm("TEST DEVICE", State::Ok, source));
+    test_reporter
+        .report(get_test_alarm("TEST DEVICE", State::Ok, source))
+        .await;
 
     let key = Key {
         device: "TEST DEVICE".to_string(),
@@ -205,18 +209,22 @@ fn report_new_alarm() {
     };
     assert!(!test_reporter.known_alarms.contains_key(&key));
 
-    test_reporter.report(get_test_alarm("TEST DEVICE", State::Alarmed, source));
+    test_reporter
+        .report(get_test_alarm("TEST DEVICE", State::Alarmed, source))
+        .await;
     let status = test_reporter.known_alarms.get(&key).unwrap();
     assert_eq!(status.state(), State::Alarmed);
     assert_eq!(status.severity(), Severity::Low);
 }
 
-#[test]
-fn report_same_alarm_does_not_throw_err() {
-    let mut test_reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn report_same_alarm_does_not_throw_err() {
+    let mut test_reporter = AlarmsReporter::new(TestPub::init());
 
     let source = Source::Analog;
-    test_reporter.report(get_test_alarm("TEST DEVICE", State::Ok, source));
+    test_reporter
+        .report(get_test_alarm("TEST DEVICE", State::Ok, source))
+        .await;
 
     let key = Key {
         device: "TEST DEVICE".to_string(),
@@ -225,16 +233,16 @@ fn report_same_alarm_does_not_throw_err() {
     assert!(!test_reporter.known_alarms.contains_key(&key));
 }
 
-#[test]
-fn test_should_publish_logic() {
-    let reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn test_should_publish_logic() {
+    let reporter = AlarmsReporter::new(TestPub::init());
 
     // New alarm should publish
     let alarm = get_test_alarm("DEV1", State::Ok, Source::Analog);
     assert!(reporter.should_publish(&alarm));
 
     // Simulate stored previous state
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+    let mut reporter = AlarmsReporter::new(TestPub::init());
     let key = Key {
         device: "DEV1".to_string(),
         source: Source::Analog,
@@ -250,13 +258,19 @@ fn test_should_publish_logic() {
     assert!(reporter.should_publish(&state_change));
 }
 
-#[test]
-fn get_snapshot_returns_non_ok_alarms() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn get_snapshot_returns_non_ok_alarms() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
-    reporter.report(get_test_alarm("DEVICE B", State::Alarmed, Source::Digital));
-    reporter.report(get_test_alarm("DEVICE A", State::Ok, Source::Analog)); // clears device a
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
+    reporter
+        .report(get_test_alarm("DEVICE B", State::Alarmed, Source::Digital))
+        .await;
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Ok, Source::Analog))
+        .await; // clears device a
 
     let snapshot = reporter.get_snapshot();
     assert_eq!(snapshot.len(), 1);
@@ -264,11 +278,13 @@ fn get_snapshot_returns_non_ok_alarms() {
     assert_eq!(snapshot[0].state(), State::Alarmed);
 }
 
-#[test]
-fn get_snapshot_includes_bypassed_alarms() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn get_snapshot_includes_bypassed_alarms() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let snapshot = reporter.get_snapshot();
     assert_eq!(snapshot.len(), 1);
@@ -276,30 +292,38 @@ fn get_snapshot_includes_bypassed_alarms() {
     assert_eq!(snapshot[0].state(), State::Bypassed);
 }
 
-#[test]
-fn bypass_suppresses_alarm_arriving_after_bypass_is_set() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn bypass_suppresses_alarm_arriving_after_bypass_is_set() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
     // Clear the publisher so we can detect whether the next report publishes
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
     // An alarm on the same source (Analog) must be suppressed.
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
 
-    assert!(reporter.controls_publisher.latest.is_none());
+    assert!(reporter.controls_publisher.get_latest().is_none());
 }
 
 // ── Blocker 2 regression tests ────────────────────────────────────────────────
 
 /// When a bypass is set on a specific source that already has a real alarm,
 /// the existing entry must be replaced by the bypass record (state: Bypassed).
-#[test]
-fn bypass_replaces_real_source_entry_with_bypass_record() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn bypass_replaces_real_source_entry_with_bypass_record() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let analog_key = Key {
         device: "DEVICE A".to_string(),
@@ -316,41 +340,51 @@ fn bypass_replaces_real_source_entry_with_bypass_record() {
 
 /// After a bypass is set on Analog, a new alarm arriving on the same source
 /// must be suppressed.
-#[test]
-fn bypass_suppresses_alarm_on_same_source() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn bypass_suppresses_alarm_on_same_source() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Clear the publisher so we can detect whether the next report publishes
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
 
     // Must be suppressed — bypass entry is present for Analog
     assert!(
-        reporter.controls_publisher.latest.is_none(),
+        reporter.controls_publisher.get_latest().is_none(),
         "alarm on Analog source should have been suppressed by bypass"
     );
 }
 
 /// Bypass on Analog must NOT suppress alarms arriving on a different source
 /// (Digital).  Source-specific bypass only affects the bypassed source.
-#[test]
-fn bypass_on_one_source_does_not_suppress_other_sources() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn bypass_on_one_source_does_not_suppress_other_sources() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Clear the publisher so we can detect whether the next report publishes
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
     // An alarm on a different source (Digital) must NOT be suppressed.
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Digital));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Digital))
+        .await;
 
     assert!(
-        reporter.controls_publisher.latest.is_some(),
+        reporter.controls_publisher.get_latest().is_some(),
         "alarm on Digital source must NOT be suppressed by an Analog bypass"
     );
 }
@@ -358,34 +392,44 @@ fn bypass_on_one_source_does_not_suppress_other_sources() {
 /// Simulates the Redis stream path: an alarm arrives on Analog, the Analog
 /// source is bypassed, then a subsequent Redis stream update arrives on Epics.
 /// The Epics update must NOT be suppressed.
-#[test]
-fn bypass_does_not_suppress_alarm_on_different_source_via_redis_stream() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn bypass_does_not_suppress_alarm_on_different_source_via_redis_stream() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
     // Simulates a Redis stream update on Analog
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Clear the publisher so we can detect whether the next report publishes
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
     // Simulates a subsequent Redis stream update on a different source (Epics)
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Epics));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Epics))
+        .await;
 
     assert!(
-        reporter.controls_publisher.latest.is_some(),
+        reporter.controls_publisher.get_latest().is_some(),
         "alarm on Epics source must NOT be suppressed by an Analog bypass"
     );
 }
 
 /// `set_active` must remove only the bypass entry for the specific source and
 /// publish a single `Unbypassed` event for that source.
-#[test]
-fn set_active_removes_bypass_entry_and_publishes_unbypassed() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn set_active_removes_bypass_entry_and_publishes_unbypassed() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
-    reporter.set_active("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
+    reporter
+        .set_active("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let analog_key = Key {
         device: "DEVICE A".to_string(),
@@ -401,11 +445,10 @@ fn set_active_removes_bypass_entry_and_publishes_unbypassed() {
     // Published message must have the actual source and state Unbypassed
     let published = reporter
         .controls_publisher
-        .latest
-        .as_ref()
+        .get_latest()
         .expect("expected an Unbypassed message to be published");
 
-    let body: Status = serde_json::from_str(&published.value)
+    let body: Status = serde_json::from_str(published.value_ref())
         .expect("published message body should deserialize as Status");
 
     assert_eq!(
@@ -421,16 +464,22 @@ fn set_active_removes_bypass_entry_and_publishes_unbypassed() {
 }
 
 /// `set_active` on one source must not affect a bypass on a different source.
-#[test]
-fn set_active_on_one_source_does_not_affect_bypass_on_other_source() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn set_active_on_one_source_does_not_affect_bypass_on_other_source() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
     // Bypass both Analog and Digital independently.
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
-    reporter.set_bypass("DEVICE A#Digital".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
+    reporter
+        .set_bypass("DEVICE A#Digital".to_string(), "operator".to_string())
+        .await;
 
     // Activate (unbypass) only Analog.
-    reporter.set_active("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_active("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let analog_key = Key {
         device: "DEVICE A".to_string(),
@@ -461,16 +510,22 @@ fn set_active_on_one_source_does_not_affect_bypass_on_other_source() {
 
 /// Acknowledging a specific source must not affect other sources for the same
 /// device.
-#[test]
-fn acknowledge_on_specific_source_does_not_affect_other_sources() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn acknowledge_on_specific_source_does_not_affect_other_sources() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
     // Pre-populate two sources as Alarmed.
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Digital));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Digital))
+        .await;
 
     // Acknowledge only the Analog source.
-    reporter.set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let analog_key = Key {
         device: "DEVICE A".to_string(),
@@ -507,18 +562,22 @@ fn acknowledge_on_specific_source_does_not_affect_other_sources() {
 /// `set_active` called on a device-source that is currently Alarmed (not
 /// Bypassed) must be a no-op — it must not clear the alarm from the cache or
 /// publish an Unbypassed event.
-#[test]
-fn set_active_does_not_clear_non_bypassed_alarm() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn set_active_does_not_clear_non_bypassed_alarm() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
     // Pre-populate an Alarmed entry (not bypassed).
-    reporter.report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog));
+    reporter
+        .report(get_test_alarm("DEVICE A", State::Alarmed, Source::Analog))
+        .await;
 
     // Clear the publisher so we can detect whether set_active publishes anything.
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
     // Attempt to activate a source that is Alarmed, not Bypassed.
-    reporter.set_active("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_active("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     let analog_key = Key {
         device: "DEVICE A".to_string(),
@@ -538,25 +597,29 @@ fn set_active_does_not_clear_non_bypassed_alarm() {
 
     // Nothing should have been published.
     assert!(
-        reporter.controls_publisher.latest.is_none(),
+        reporter.controls_publisher.get_latest().is_none(),
         "set_active on a non-bypassed source must not publish anything"
     );
 }
 
 /// Acknowledging a bypassed source must be a no-op — it must not pull the
 /// source out of bypass.
-#[test]
-fn acknowledge_does_not_override_bypass() {
-    let mut reporter = AlarmsReporter::<TestPub>::new();
+#[tokio::test]
+async fn acknowledge_does_not_override_bypass() {
+    let mut reporter = AlarmsReporter::new(TestPub::init());
 
     // Bypass the Analog source.
-    reporter.set_bypass("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_bypass("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // Clear the publisher so we can detect whether acknowledge publishes anything.
-    reporter.controls_publisher.latest = None;
+    *reporter.controls_publisher.latest.lock().unwrap() = None;
 
     // Attempt to acknowledge the bypassed source.
-    reporter.set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string());
+    reporter
+        .set_acknowledged("DEVICE A#Analog".to_string(), "operator".to_string())
+        .await;
 
     // The bypass entry must still be Bypassed, not Acknowledged.
     let analog_key = Key {
@@ -575,7 +638,7 @@ fn acknowledge_does_not_override_bypass() {
 
     // Nothing should have been published.
     assert!(
-        reporter.controls_publisher.latest.is_none(),
+        reporter.controls_publisher.get_latest().is_none(),
         "acknowledge on a bypassed source must not publish anything"
     );
 }
