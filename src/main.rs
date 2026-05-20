@@ -48,11 +48,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start gRPC server
     spawn(async move {
-        info!("Starting gRPC server on port 50051");
+        info!("Starting gRPC server on port 6802");
 
         Server::builder()
             .add_service(AlarmCommandsServer::new(grpc_service))
-            .serve("[::]:50051".parse().unwrap())
+            .serve("[::]:6802".parse().unwrap())
             .await
             .expect("gRPC server failed");
     });
