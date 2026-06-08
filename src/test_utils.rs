@@ -1,28 +1,53 @@
-use std::sync::Mutex;
+//! Shared test fixtures and helpers for binary-crate modules.
 
-use rust_pubsub_lib::{Message, PubSubError, Publisher, StringMessage};
+use std::sync::{Arc, Mutex};
 
+use rust_pubsub_lib::{ByteMessage, Message, PubSubError, Publisher};
+
+use crate::{
+    proto::{
+        common::alarm::{
+            Status,
+            status::{Severity, Source, State},
+        },
+        google::protobuf::Timestamp,
+    },
+    runtime::{self, AlarmStateIngress, QueueCapacityConfig},
+};
+
+pub const DEFAULT_TEST_QUEUE_CONFIG: QueueCapacityConfig = QueueCapacityConfig {
+    automated: 10,
+    priority: 10,
+    effect: 10,
+};
+
+/// Test publisher that records the latest published message and can simulate failures.
 #[derive(Debug)]
 pub struct TestPub {
-    pub latest: Mutex<Option<StringMessage>>,
+    latest: Arc<Mutex<Option<ByteMessage>>>,
     throw_err: bool,
 }
 
 impl TestPub {
+    /// Creates a publisher that always returns an error after recording the message.
     pub fn init_throwing() -> Self {
         Self {
-            latest: Mutex::new(None),
+            latest: Arc::default(),
             throw_err: true,
         }
     }
 
+    /// Creates a publisher with an internal message store.
     pub fn init() -> Self {
         Self::new(String::new(), String::new())
     }
 
-    /// Convenience accessor for tests that need to read the last published message.
-    pub fn get_latest(&self) -> Option<StringMessage> {
-        self.latest.lock().unwrap().clone()
+    /// Creates a publisher that writes the latest message into the provided shared store.
+    pub fn init_inspectable(dropbox: Arc<Mutex<Option<ByteMessage>>>) -> Self {
+        Self {
+            latest: dropbox,
+            throw_err: false,
+        }
     }
 }
 
@@ -30,17 +55,42 @@ impl TestPub {
 impl Publisher for TestPub {
     fn new(_host: String, _topic: String) -> Self {
         Self {
-            latest: Mutex::new(None),
+            latest: Arc::default(),
             throw_err: false,
         }
     }
 
     async fn publish<M: Message>(&self, message: M) -> Result<(), PubSubError> {
-        if self.throw_err {
-            return Err(PubSubError::default());
-        }
-        let string_msg = StringMessage::from(message.into_bytes());
-        *self.latest.lock().unwrap() = Some(string_msg);
-        Ok(())
+        let mut latest_val = self.latest.lock().expect("latest lock poisoned");
+        let _ = latest_val.insert(message.into_bytes());
+        (!self.throw_err)
+            .then_some(())
+            .ok_or_else(PubSubError::default)
+    }
+}
+
+pub async fn get_runtime() -> AlarmStateIngress {
+    runtime::start(TestPub::init(), DEFAULT_TEST_QUEUE_CONFIG).await
+}
+
+pub async fn get_throwing_runtime() -> AlarmStateIngress {
+    runtime::start(TestPub::init_throwing(), DEFAULT_TEST_QUEUE_CONFIG).await
+}
+
+/// Builds a minimal [`Status`] for use in tests.
+pub fn make_status(device: &str, state: State, source: Source) -> Status {
+    Status {
+        device: device.to_string(),
+        state: state as i32,
+        severity: Severity::Low as i32,
+        source: source as i32,
+        acknowledgeable: false,
+        time: Some(Timestamp {
+            seconds: 0,
+            nanos: 0,
+        }),
+        epics_type: String::new(),
+        user: String::new(),
+        wake: None,
     }
 }
