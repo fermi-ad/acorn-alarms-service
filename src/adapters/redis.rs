@@ -166,6 +166,17 @@ fn build_status_from_redis(mut redis_entries: HashMap<String, String>) -> Status
         _ => Source::Unknown,
     };
 
+    let time_secs = redis_entries
+        .remove("timestamp")
+        .and_then(|time_str| match time_str.trim().parse() {
+            Ok(parsed) => Some(parsed),
+            Err(e) => {
+                error!("Failed to parse timestamp string to int. Error: {e}: '{time_str}'");
+                None
+            }
+        })
+        .unwrap_or_else(|| Utc::now().timestamp());
+
     Status {
         device,
         severity: severity_enum as i32,
@@ -173,7 +184,7 @@ fn build_status_from_redis(mut redis_entries: HashMap<String, String>) -> Status
         source: source_enum as i32,
         acknowledgeable: false,
         time: Some(Timestamp {
-            seconds: Utc::now().timestamp(),
+            seconds: time_secs,
             nanos: 0,
         }),
         epics_type: String::default(),
