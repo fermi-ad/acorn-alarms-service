@@ -4,6 +4,6 @@ FROM debian:trixie-slim
 RUN apt-get update -y && apt-get install -y libssl3 libsasl2-2 && apt-get clean -y
 
 WORKDIR /app
-COPY target/release/acorn-alarms-service /app/acorn-alarms-service
+COPY target/release/grpc-alarms /app/grpc-alarms
 EXPOSE 6802
-CMD [ "./acorn-alarms-service" ]
+CMD [ "./grpc-alarms" ]

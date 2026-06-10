@@ -1,25 +1,32 @@
 [package]
-name = "acorn-alarms-service"
-version = "0.1.0"
+name = "grpc-alarms"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
 chrono = "0.4.44"
+futures = "0.3.32"
 prost = "0.14.3"
+ringmap = "0.2.5"
 rust-env-var-lib = { git = "https://github.com/fermi-ad/rust-env-var-lib.git", tag = "v1.2.0" }
+rust-grpc-lib = { git = "https://github.com/fermi-ad/rust-grpc-lib.git", tag = "v3.0.0" }
 rust-pubsub-lib = { git = "https://github.com/fermi-ad/rust-pubsub-lib.git", tag = "v8.0.0", features = ["kafka", "redis-stream"] }
-tokio-stream = "0.1.18"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "signal"] }
+tokio-stream = "0.1.18"
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
 
 [build-dependencies]
-protoc-bin-vendored = "3.2"
-tonic-prost-build = "0.14.6"
+rust-grpc-lib = { git = "https://github.com/fermi-ad/rust-grpc-lib.git", tag = "v3.0.0", features = ["build"] }
 
 [dev-dependencies]
 rust-pubsub-lib = { git = "https://github.com/fermi-ad/rust-pubsub-lib.git", tag = "v8.0.0", features = ["kafka", "redis-stream", "testing-utils"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
