@@ -25,6 +25,9 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+const DEFAULT_HYDRATED_ID: u64 = 0;
+const INITIAL_PUBLISH_ID: u64 = 1;
+
 /// Owns alarm-state decisions and reconciles publish outcomes back into domain state.
 ///
 /// The coordinator is the semantic authority for the alarm domain:
@@ -67,19 +70,26 @@ pub struct AlarmStateCoordinator {
 
 impl AlarmStateCoordinator {
     /// Creates a coordinator with separate automated and priority ingress channels.
+    ///
+    /// Hydrated statuses seed `confirmed_state` with the reserved baseline id so
+    /// the first live publish id remains newer than any startup-restored entry.
     pub fn new(
         automated_rx: mpsc::Receiver<CoordinatorMessage>,
         priority_rx: mpsc::Receiver<CoordinatorMessage>,
         effect_tx: mpsc::Sender<DomainEffect>,
+        hydrated_statuses: HashMap<Key, Status>,
     ) -> Self {
         Self {
-            confirmed_state: HashMap::new(),
+            confirmed_state: hydrated_statuses
+                .into_iter()
+                .map(|(key, status)| (key, (status, DEFAULT_HYDRATED_ID)))
+                .collect(),
             speculative_state: HashMap::new(),
             pending_confirmations: HashMap::new(),
             automated_rx,
             priority_rx,
             effect_tx,
-            id_counter: 0,
+            id_counter: INITIAL_PUBLISH_ID,
         }
     }
 

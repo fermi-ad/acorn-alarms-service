@@ -1,5 +1,7 @@
 //! Runtime wiring for the alarm state ingress and background tasks.
 
+pub mod hydration;
+
 use rust_pubsub_lib::Publisher;
 use tokio::sync::mpsc;
 
@@ -10,6 +12,7 @@ use crate::{
         ingress::{AutomatedIngressHandle, UserIngressHandle},
     },
     metrics::{Metrics, QueueKind},
+    runtime::hydration::HydratedStatuses,
 };
 
 /// Handles for submitting automated and user-driven ingress messages.
@@ -30,6 +33,7 @@ pub struct QueueCapacityConfig {
 pub async fn start<P: Publisher + Send + Sync + 'static>(
     publisher: P,
     queue_config: QueueCapacityConfig,
+    hydrated_statuses: HydratedStatuses,
 ) -> AlarmStateIngress {
     let metrics = Metrics::new();
     metrics.set_queue_capacity(QueueKind::Automated, queue_config.automated);
@@ -49,7 +53,8 @@ pub async fn start<P: Publisher + Send + Sync + 'static>(
         metrics.clone(),
     ));
 
-    let coordinator = AlarmStateCoordinator::new(automated_rx, priority_rx, effect_tx);
+    let coordinator =
+        AlarmStateCoordinator::new(automated_rx, priority_rx, effect_tx, hydrated_statuses);
     tokio::spawn(coordinator.start());
 
     AlarmStateIngress {

@@ -3,16 +3,14 @@
 use std::time::Duration;
 
 use rust_env_var_lib::env_var;
-use rust_pubsub_lib::{Publisher, kafka_impl::KafkaPublisher};
+use rust_pubsub_lib::{KafkaSnapshot, Publisher, kafka_impl::KafkaPublisher};
 use tokio::{signal, spawn, time};
 use tonic::transport::Server;
 use tracing::{Level, debug, error, info, warn};
 
-use adapters::grpc::AlarmCommandsService;
-use adapters::redis::start_redis_reader;
+use adapters::{grpc::AlarmCommandsService, redis::start_redis_reader};
 use proto::services::alarm_commands::alarm_commands_server::AlarmCommandsServer;
-
-use crate::runtime::QueueCapacityConfig;
+use runtime::{QueueCapacityConfig, hydration::load_startup_hydration};
 
 mod adapters;
 mod effects;
@@ -55,10 +53,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Acorn Alarms Service starting…");
 
-    let publisher = get_kafka_publisher();
+    let kafka_host = get_kafka_host();
+    let kafka_topic = get_kafka_topic();
+    let hydrated_statuses =
+        load_startup_hydration::<KafkaSnapshot>(kafka_host.clone(), kafka_topic.clone()).await?;
+    let publisher = KafkaPublisher::new(kafka_host, kafka_topic);
     let queue_config = get_queue_sizes();
 
-    let ingress = runtime::start(publisher, queue_config).await;
+    let ingress = runtime::start(publisher, queue_config, hydrated_statuses).await;
     let metrics_log_interval = get_metrics_log_interval();
 
     let grpc_service = AlarmCommandsService {
@@ -104,12 +106,12 @@ async fn log_metrics_periodically(metrics: metrics::Metrics, interval: Duration)
     }
 }
 
-fn get_kafka_publisher() -> KafkaPublisher {
-    let host = env_var::get(CONTROLS_KAFKA_HOST).or_else(|| DEFAULT_CONTROLS_HOST.to_string());
+fn get_kafka_host() -> String {
+    env_var::get(CONTROLS_KAFKA_HOST).or_else(|| DEFAULT_CONTROLS_HOST.to_string())
+}
 
-    let topic = env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| DEFAULT_CONTROLS_TOPIC.to_string());
-
-    KafkaPublisher::new(host, topic)
+fn get_kafka_topic() -> String {
+    env_var::get(CONTROLS_ALARMS_TOPIC).or_else(|| DEFAULT_CONTROLS_TOPIC.to_string())
 }
 
 fn get_metrics_log_interval() -> Duration {

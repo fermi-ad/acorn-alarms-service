@@ -12,7 +12,7 @@ use crate::{
         },
         google::protobuf::Timestamp,
     },
-    runtime::{self, AlarmStateIngress, QueueCapacityConfig},
+    runtime::{self, AlarmStateIngress, QueueCapacityConfig, hydration::HydratedStatuses},
 };
 
 pub const DEFAULT_TEST_QUEUE_CONFIG: QueueCapacityConfig = QueueCapacityConfig {
@@ -70,11 +70,21 @@ impl Publisher for TestPub {
 }
 
 pub async fn get_runtime() -> AlarmStateIngress {
-    runtime::start(TestPub::init(), DEFAULT_TEST_QUEUE_CONFIG).await
+    runtime::start(
+        TestPub::init(),
+        DEFAULT_TEST_QUEUE_CONFIG,
+        HydratedStatuses::new(),
+    )
+    .await
 }
 
 pub async fn get_throwing_runtime() -> AlarmStateIngress {
-    runtime::start(TestPub::init_throwing(), DEFAULT_TEST_QUEUE_CONFIG).await
+    runtime::start(
+        TestPub::init_throwing(),
+        DEFAULT_TEST_QUEUE_CONFIG,
+        HydratedStatuses::new(),
+    )
+    .await
 }
 
 /// Builds a minimal [`Status`] for use in tests.
