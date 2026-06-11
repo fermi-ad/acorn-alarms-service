@@ -231,6 +231,55 @@ fn source_lowercase_digital_is_accepted() {
 }
 
 // ---------------------------------------------------------------------------
+// Parse timestamp
+// ---------------------------------------------------------------------------
+
+#[test]
+fn timestamp_is_extracted_when_present() {
+    let map = make_map(&[
+        ("device", "D"),
+        ("severity", "HIGH"),
+        ("source", "ANALOG"),
+        ("timestamp", "123456789"),
+    ]);
+    let status = build_status_from_redis(map);
+    assert!(
+        status
+            .time
+            .is_some_and(|timestamp| timestamp.seconds == 123_456_789)
+    );
+}
+
+#[test]
+fn timestamp_defaults_to_current_second_when_absent() {
+    let current = Utc::now().timestamp();
+    let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "ANALOG")]);
+    let status = build_status_from_redis(map);
+    assert!(
+        status
+            .time
+            .is_some_and(|timestamp| timestamp.seconds >= current)
+    );
+}
+
+#[test]
+fn timestamp_defaults_to_current_second_when_malformed() {
+    let current = Utc::now().timestamp();
+    let map = make_map(&[
+        ("device", "D"),
+        ("severity", "HIGH"),
+        ("source", "ANALOG"),
+        ("timestamp", "123abcdefghijk"),
+    ]);
+    let status = build_status_from_redis(map);
+    assert!(
+        status
+            .time
+            .is_some_and(|timestamp| timestamp.seconds >= current)
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Fixed / default fields
 // ---------------------------------------------------------------------------
 
@@ -239,15 +288,6 @@ fn acknowledgeable_is_always_false() {
     let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "ANALOG")]);
     let status = build_status_from_redis(map);
     assert!(!status.acknowledgeable);
-}
-
-#[test]
-fn timestamp_is_populated() {
-    let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "ANALOG")]);
-    let status = build_status_from_redis(map);
-    assert!(status.time.is_some());
-    // Timestamp must be a plausible Unix epoch value (after year 2000).
-    assert!(status.time.unwrap().seconds > 946_684_800);
 }
 
 #[test]
