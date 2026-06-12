@@ -5,6 +5,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+use std::collections::HashMap;
+
 use crate::{
     engine::messages::{CoordinatorMessage, DomainInput},
     model::{errors::UpdateError, key::Key, user_action::UserAction},
@@ -15,8 +17,10 @@ use crate::{
         },
         google::protobuf::Timestamp,
     },
-    runtime::AlarmStateIngress,
-    test_utils::{get_runtime, get_throwing_runtime, make_status},
+    runtime::{self, AlarmStateIngress},
+    test_utils::{
+        DEFAULT_TEST_QUEUE_CONFIG, TestPub, get_runtime, get_throwing_runtime, make_status,
+    },
 };
 
 async fn user_update(
@@ -565,6 +569,53 @@ async fn stale_automated_failure_does_not_block_later_user_command() {
     assert!(
         result.is_ok(),
         "the earlier automated failure must not prevent the later user command from resolving"
+    );
+}
+
+#[tokio::test]
+async fn seeded_confirmed_state_appears_in_snapshot() {
+    let mut hydrated = HashMap::new();
+    hydrated.insert(
+        Key::try_from("M:BEAM#Epics").unwrap(),
+        make_status("M:BEAM", State::Bypassed, Source::Epics),
+    );
+
+    let ingress = runtime::start(TestPub::init(), DEFAULT_TEST_QUEUE_CONFIG, hydrated).await;
+
+    let snap = snapshot(&ingress).await;
+    assert_eq!(snap.len(), 1, "seeded state must appear in snapshot");
+    assert_eq!(snap[0].device, "M:BEAM");
+    assert_eq!(snap[0].state(), State::Bypassed);
+    assert_eq!(snap[0].source(), Source::Epics);
+}
+
+#[tokio::test]
+async fn first_live_update_supersedes_hydrated_state_for_same_key() {
+    let mut hydrated = HashMap::new();
+    hydrated.insert(
+        Key::try_from("M:BEAM#Epics").unwrap(),
+        make_status("M:BEAM", State::Bypassed, Source::Epics),
+    );
+
+    let ingress = runtime::start(TestPub::init(), DEFAULT_TEST_QUEUE_CONFIG, hydrated).await;
+
+    let result = user_update(
+        &ingress,
+        Key::try_from("M:BEAM#Epics").unwrap(),
+        UserAction::Activate,
+        "operator",
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "first live update should not be treated as stale"
+    );
+
+    let snap = snapshot(&ingress).await;
+    assert!(
+        snap.is_empty(),
+        "the first live update should replace the hydrated bypass with an unbypassed state"
     );
 }
 

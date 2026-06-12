@@ -30,13 +30,14 @@ The main architectural boundary is between domain logic and transport logic:
 
 ## Runtime architecture
 
-At startup, [`src/main.rs`](src/main.rs) does five things:
+At startup, [`src/main.rs`](src/main.rs) does six things:
 
 1. configures tracing
-2. creates the Kafka publisher
-3. reads queue-capacity and metrics-log configuration from environment variables
-4. starts the runtime in [`src/runtime.rs`](src/runtime.rs)
-5. spawns the gRPC server, Redis reader restart loop, and periodic metrics logging task
+2. reads Kafka host/topic configuration and loads startup hydration from the Kafka snapshot
+3. creates the Kafka publisher
+4. reads queue-capacity and metrics-log configuration from environment variables
+5. starts the runtime in [`src/runtime.rs`](src/runtime.rs) with hydrated confirmed state
+6. spawns the gRPC server, Redis reader restart loop, and periodic metrics logging task
 
 The runtime wiring in [`src/runtime.rs`](src/runtime.rs) creates three bounded channels:
 
@@ -55,13 +56,15 @@ Those queues connect the main subsystems:
 
 ### Entrypoints and runtime
 
-- [`src/main.rs`](src/main.rs): process entrypoint, tracing setup, Kafka publisher creation, queue sizing, metrics logging, gRPC server startup, Redis reader restart loop
+- [`src/main.rs`](src/main.rs): process entrypoint, tracing setup, startup hydration, Kafka publisher creation, queue sizing, metrics logging, gRPC server startup, Redis reader restart loop
 - [`src/runtime.rs`](src/runtime.rs): runtime wiring, queue sizing types, task startup, ingress handles returned to adapters
+- [`src/runtime/hydration.rs`](src/runtime/hydration.rs): startup hydration assembly, merge rules, and hydration error types
 
 ### Adapters
 
 - [`src/adapters/grpc.rs`](src/adapters/grpc.rs): gRPC service implementation for user-driven commands and snapshots
 - [`src/adapters/redis.rs`](src/adapters/redis.rs): Redis Stream subscriber for automated alarm updates
+- [`src/adapters/epics_hydration.rs`](src/adapters/epics_hydration.rs): EPICS startup hydration loader and snapshot reduction rules
 - [`src/adapters.rs`](src/adapters.rs): adapter module exports
 
 ### Domain engine
@@ -143,6 +146,7 @@ It is responsible for:
 - assigning monotonically increasing publish ids
 - tracking speculative state until publish outcomes return
 - committing confirmed state only when publish results are accepted
+- seeding confirmed state from startup hydration before live traffic begins
 - serving snapshots from confirmed state
 
 The most important internal distinction is:
@@ -200,6 +204,8 @@ This split is one of the most important design choices in the repository.
 ### Snapshot semantics
 
 The gRPC snapshot path ultimately calls [`build_snapshot()`](src/engine/coordinator.rs), which returns only confirmed alarms whose state is not `Ok` and not `Unbypassed`.
+
+Because startup hydration seeds confirmed state before the runtime begins serving traffic, the first externally visible snapshot can already include restored EPICS bypass state.
 
 Maintainers changing snapshot behavior should start there.
 
@@ -264,11 +270,19 @@ Current parsing behavior includes:
 
 The reader loop in [`src/main.rs`](src/main.rs) restarts the Redis reader whenever it exits with either success or error, logging the condition and reconnecting.
 
-### Kafka publishing
+### Kafka publishing and startup hydration
 
 The publish effect worker in [`src/effects/publish.rs`](src/effects/publish.rs) serializes protobuf `Status` values to JSON and publishes them as keyed messages.
 
 The Kafka message key is the string form of [`Key`](src/model/key.rs), and the message body is the JSON serialization of the alarm status.
+
+At startup, [`load_startup_hydration()`](src/runtime/hydration.rs:47) reads a Kafka-backed snapshot through [`load_epics_hydration()`](src/adapters/epics_hydration.rs:39) before live adapters start. The current hydration rules are:
+
+- only EPICS keys are considered
+- only `Bypassed` EPICS statuses are retained in hydrated state
+- empty payloads and `null` payloads act as tombstones and remove prior hydrated state for that key
+- malformed individual records are logged and skipped
+- snapshot read failure is startup-fatal
 
 ## Configuration
 
@@ -276,8 +290,8 @@ The current implementation reads the following environment variables:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `CONTROLS_KAFKA_HOST` | Kafka bootstrap host used by the publisher | `kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092` |
-| `CONTROLS_ALARMS_TOPIC` | Kafka topic for published alarm states | `alarms` |
+| `CONTROLS_KAFKA_HOST` | Kafka bootstrap host used by both startup hydration snapshot reads and publish output | `kafka-cluster-kafka-bootstrap.kafka.svc.adkube.fnal.gov:9092` |
+| `CONTROLS_ALARMS_TOPIC` | Kafka topic used by both startup hydration snapshot reads and published alarm states | `alarms` |
 | `EPICS_ALARM_REDIS_HOST` | Redis host for EPICS alarm stream ingestion | `127.0.0.1` |
 | `EPICS_ALARM_REDIS_PORT` | Redis port for EPICS alarm stream ingestion | `6379` |
 | `EPICS_ALARM_REDIS_KEY` | Redis Stream key to subscribe to | `acorn:alarms` |
@@ -328,8 +342,9 @@ Running the compiled binary directly avoids Cargo-managed test configuration and
 Whether launched via [`cargo run`](README.md) or as a compiled binary, the service will:
 
 - start tracing output to stdout
+- read startup hydration from Kafka using the configured host and topic
 - start the gRPC server on port `6802`
-- connect to Kafka using the configured host and topic
+- connect to Kafka using the configured host and topic for publish output
 - connect to the configured Redis Stream and begin forwarding automated updates
 - log periodic metrics snapshots at the configured interval
 
