@@ -3,4 +3,5 @@
 pub mod errors;
 pub mod key;
 pub mod publish;
+pub mod snooze;
 pub mod user_action;

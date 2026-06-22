@@ -1,7 +1,23 @@
-//! Low-cardinality in-process metrics for overload, queue pressure proxies, retries, and latency.
+//! Low-cardinality in-process metrics for overload, queue pressure proxies, retries, latency,
+//! workflow throughput, and snooze timer activity.
 //!
-//! The service records metrics synchronously with cheap atomics and mutex-protected histograms.
+//! Metrics are recorded synchronously using cheap atomics and mutex-protected histograms.
 //! Export is intentionally left out of this module so hot paths remain simple and non-blocking.
+//!
+//! ## Counter and gauge groups
+//!
+//! - **Overload / ingress** (`overload_entries`, `overload_exits`, `automated_queue_full`,
+//!   `user_queue_full_rejections`): track queue pressure and overload mode transitions.
+//! - **Publish engine** (`publish_attempts`, `publish_retries`, `publish_failures`,
+//!   `in_flight_publish_attempts`): track Kafka publish activity and retry behavior.
+//! - **Workflow handler** (`jobs_dispatched`, `jobs_committed`, `jobs_failed`, `snooze_wakes`):
+//!   track job throughput through the per-key effect pipeline.
+//! - **Snooze scheduler** (`snooze_sets`, `snooze_cancels`, `snooze_invalid_wakes`,
+//!   `snooze_expirations`, `in_flight_snooze_timers`): track timer activity in the snooze
+//!   scheduler.
+//! - **Queue capacities** (`automated_queue_capacity`, `user_queue_capacity`,
+//!   `job_queue_capacity`, `publish_queue_capacity`, `snooze_queue_capacity`): fixed at
+//!   construction from [`QueueCapacityConfig`]; reflected in every snapshot without mutation.
 
 use std::{
     sync::{
@@ -11,6 +27,8 @@ use std::{
     time::Duration,
 };
 
+use crate::runtime::QueueCapacityConfig;
+
 #[cfg(test)]
 mod tests;
 
@@ -18,20 +36,16 @@ const CONFIRMATION_LATENCY_BUCKETS_MS: &[u64] = &[10, 50, 100, 250, 500, 1_000, 
 const PUBLISH_LATENCY_BUCKETS_MS: &[u64] = &[5, 10, 25, 50, 100, 250, 500, 1_000];
 const OVERLOAD_DURATION_BUCKETS_MS: &[u64] = &[10, 50, 100, 250, 500, 1_000, 5_000];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum QueueKind {
-    Automated,
-    Priority,
-    Effect,
-}
-
+/// Outcome kind for a single publish attempt, used with [`Metrics::record_publish_completion`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PublishOutcomeKind {
     Success,
     Failure,
-    Superseded,
 }
 
+/// Cheap, clone-friendly handle to the shared metrics state.
+///
+/// All methods are lock-free except the histogram observers, which take a short `Mutex` lock.
 #[derive(Clone, Debug)]
 pub struct Metrics {
     inner: Arc<MetricsInner>,
@@ -39,17 +53,47 @@ pub struct Metrics {
 
 #[derive(Debug)]
 struct MetricsInner {
+    // ── overload / ingress ──────────────────────────────────────────────────
     overload_entries: AtomicU64,
     overload_exits: AtomicU64,
     automated_queue_full: AtomicU64,
     user_queue_full_rejections: AtomicU64,
+
+    // ── publish engine ──────────────────────────────────────────────────────
     publish_attempts: AtomicU64,
     publish_retries: AtomicU64,
     publish_failures: AtomicU64,
-    publish_superseded: AtomicU64,
+
+    // ── workflow handler ────────────────────────────────────────────────────
+    jobs_dispatched: AtomicU64,
+    jobs_committed: AtomicU64,
+    jobs_failed: AtomicU64,
+    snooze_wakes: AtomicU64,
+
+    // ── snooze scheduler ────────────────────────────────────────────────────
+    snooze_sets: AtomicU64,
+    snooze_cancels: AtomicU64,
+    snooze_invalid_wakes: AtomicU64,
+    snooze_expirations: AtomicU64,
+
+    // ── queue capacities (set at construction, never mutated) ───────────────
     queue_configured_capacity: QueueCapacityMetrics,
+
+    // ── in-flight gauges ────────────────────────────────────────────────────
     retained_automated_keys: AtomicUsize,
+    /// Number of publish attempts currently outstanding inside the publish engine.
+    ///
+    /// This counts work that has been handed to the Kafka producer but whose outcome has not yet
+    /// been received. It does **not** count jobs queued in the workflow handler waiting to reach
+    /// the publish step.
     in_flight_publish_attempts: AtomicUsize,
+    /// Number of snooze timers currently active inside the snooze scheduler's `DelayQueue`.
+    ///
+    /// Incremented when a `Snooze::Set` is accepted; decremented when the timer fires
+    /// (`SnoozeOutcome::Expired`) or is cancelled (`Snooze::Cancel`).
+    in_flight_snooze_timers: AtomicUsize,
+
+    // ── histograms ──────────────────────────────────────────────────────────
     confirmation_latency_ms: Mutex<Histogram>,
     publish_latency_ms: Mutex<Histogram>,
     overload_duration_ms: Mutex<Histogram>,
@@ -57,26 +101,52 @@ struct MetricsInner {
 
 #[derive(Debug)]
 struct QueueCapacityMetrics {
-    automated: AtomicUsize,
-    priority: AtomicUsize,
-    effect: AtomicUsize,
+    automated: usize,
+    user: usize,
+    job: usize,
+    publish: usize,
+    snooze: usize,
 }
 
+/// Point-in-time snapshot of all metrics.  Cheap to clone and log.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetricsSnapshot {
+    // ── overload / ingress ──────────────────────────────────────────────────
     pub overload_entries: u64,
     pub overload_exits: u64,
     pub automated_queue_full: u64,
     pub user_queue_full_rejections: u64,
+
+    // ── publish engine ──────────────────────────────────────────────────────
     pub publish_attempts: u64,
     pub publish_retries: u64,
     pub publish_failures: u64,
-    pub publish_superseded: u64,
+
+    // ── workflow handler ────────────────────────────────────────────────────
+    pub jobs_dispatched: u64,
+    pub jobs_committed: u64,
+    pub jobs_failed: u64,
+    pub snooze_wakes: u64,
+
+    // ── snooze scheduler ────────────────────────────────────────────────────
+    pub snooze_sets: u64,
+    pub snooze_cancels: u64,
+    pub snooze_invalid_wakes: u64,
+    pub snooze_expirations: u64,
+
+    // ── queue capacities ────────────────────────────────────────────────────
     pub automated_queue_capacity: usize,
-    pub priority_queue_capacity: usize,
-    pub effect_queue_capacity: usize,
+    pub user_queue_capacity: usize,
+    pub job_queue_capacity: usize,
+    pub publish_queue_capacity: usize,
+    pub snooze_queue_capacity: usize,
+
+    // ── in-flight gauges ────────────────────────────────────────────────────
     pub retained_automated_keys: usize,
     pub in_flight_publish_attempts: usize,
+    pub in_flight_snooze_timers: usize,
+
+    // ── histograms ──────────────────────────────────────────────────────────
     pub confirmation_latency_ms: HistogramSnapshot,
     pub publish_latency_ms: HistogramSnapshot,
     pub overload_duration_ms: HistogramSnapshot,
@@ -101,7 +171,11 @@ struct Histogram {
 }
 
 impl Metrics {
-    pub fn new() -> Self {
+    /// Construct a new `Metrics` instance.
+    ///
+    /// Queue capacities are fixed at construction time from `queue_config` and are reflected in
+    /// every subsequent [`snapshot`](Self::snapshot) without further mutation.
+    pub fn new(queue_config: &QueueCapacityConfig) -> Self {
         Self {
             inner: Arc::new(MetricsInner {
                 overload_entries: AtomicU64::new(0),
@@ -111,10 +185,18 @@ impl Metrics {
                 publish_attempts: AtomicU64::new(0),
                 publish_retries: AtomicU64::new(0),
                 publish_failures: AtomicU64::new(0),
-                publish_superseded: AtomicU64::new(0),
-                queue_configured_capacity: QueueCapacityMetrics::default(),
+                jobs_dispatched: AtomicU64::new(0),
+                jobs_committed: AtomicU64::new(0),
+                jobs_failed: AtomicU64::new(0),
+                snooze_wakes: AtomicU64::new(0),
+                snooze_sets: AtomicU64::new(0),
+                snooze_cancels: AtomicU64::new(0),
+                snooze_invalid_wakes: AtomicU64::new(0),
+                snooze_expirations: AtomicU64::new(0),
+                queue_configured_capacity: QueueCapacityMetrics::from(queue_config),
                 retained_automated_keys: AtomicUsize::new(0),
                 in_flight_publish_attempts: AtomicUsize::new(0),
+                in_flight_snooze_timers: AtomicUsize::new(0),
                 confirmation_latency_ms: Mutex::new(Histogram::new(
                     CONFIRMATION_LATENCY_BUCKETS_MS,
                 )),
@@ -124,25 +206,7 @@ impl Metrics {
         }
     }
 
-    pub fn set_queue_capacity(&self, queue: QueueKind, capacity: usize) {
-        match queue {
-            QueueKind::Automated => self
-                .inner
-                .queue_configured_capacity
-                .automated
-                .store(capacity, Ordering::Relaxed),
-            QueueKind::Priority => self
-                .inner
-                .queue_configured_capacity
-                .priority
-                .store(capacity, Ordering::Relaxed),
-            QueueKind::Effect => self
-                .inner
-                .queue_configured_capacity
-                .effect
-                .store(capacity, Ordering::Relaxed),
-        }
-    }
+    // ── ingress / overload ──────────────────────────────────────────────────
 
     pub fn record_automated_queue_full(&self) {
         self.inner
@@ -181,6 +245,8 @@ impl Metrics {
             .observe(duration);
     }
 
+    // ── publish engine ──────────────────────────────────────────────────────
+
     pub fn record_publish_attempt_started(&self) {
         self.inner.publish_attempts.fetch_add(1, Ordering::Relaxed);
         self.inner
@@ -192,6 +258,10 @@ impl Metrics {
         self.inner.publish_retries.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record the completion of a single publish attempt.
+    ///
+    /// Decrements `in_flight_publish_attempts` and observes the latency histogram.
+    /// Only `Failure` increments a counter; `Success` is the happy path and needs no counter.
     pub fn record_publish_completion(&self, outcome: PublishOutcomeKind, latency: Duration) {
         self.inner
             .in_flight_publish_attempts
@@ -207,11 +277,6 @@ impl Metrics {
             PublishOutcomeKind::Failure => {
                 self.inner.publish_failures.fetch_add(1, Ordering::Relaxed);
             }
-            PublishOutcomeKind::Superseded => {
-                self.inner
-                    .publish_superseded
-                    .fetch_add(1, Ordering::Relaxed);
-            }
         }
     }
 
@@ -222,6 +287,71 @@ impl Metrics {
             .expect("confirmation histogram lock poisoned")
             .observe(latency);
     }
+
+    // ── workflow handler ────────────────────────────────────────────────────
+
+    /// Increment the count of jobs received by the workflow handler.
+    pub fn record_job_dispatched(&self) {
+        self.inner.jobs_dispatched.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of jobs that completed with `JobOutcome::Committed`.
+    pub fn record_job_committed(&self) {
+        self.inner.jobs_committed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of jobs that completed with `JobOutcome::Failed`.
+    pub fn record_job_failed(&self) {
+        self.inner.jobs_failed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of snooze timer expirations that produced `JobOutcome::Wake`.
+    pub fn record_snooze_wake(&self) {
+        self.inner.snooze_wakes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ── snooze scheduler ────────────────────────────────────────────────────
+
+    /// Increment the count of `Snooze::Set` commands accepted with a valid future timestamp.
+    pub fn record_snooze_set(&self) {
+        self.inner.snooze_sets.fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .in_flight_snooze_timers
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of `Snooze::Cancel` commands that removed a live timer.
+    ///
+    /// This is only called when a timer was actually present in the `DelayQueue`; cancelling a
+    /// non-existent timer is a no-op and is not counted.  Also decrements
+    /// `in_flight_snooze_timers`.
+    pub fn record_snooze_cancel(&self) {
+        self.inner.snooze_cancels.fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .in_flight_snooze_timers
+            .fetch_sub(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of `Snooze::Set` commands rejected due to an invalid (past) timestamp.
+    pub fn record_snooze_invalid_wake(&self) {
+        self.inner
+            .snooze_invalid_wakes
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the count of snooze timers that fired and emitted `SnoozeOutcome::Expired`.
+    ///
+    /// Also decrements `in_flight_snooze_timers`.
+    pub fn record_snooze_expiration(&self) {
+        self.inner
+            .snooze_expirations
+            .fetch_add(1, Ordering::Relaxed);
+        self.inner
+            .in_flight_snooze_timers
+            .fetch_sub(1, Ordering::Relaxed);
+    }
+
+    // ── snapshot ────────────────────────────────────────────────────────────
 
     pub fn snapshot(&self) -> MetricsSnapshot {
         MetricsSnapshot {
@@ -235,27 +365,25 @@ impl Metrics {
             publish_attempts: self.inner.publish_attempts.load(Ordering::Relaxed),
             publish_retries: self.inner.publish_retries.load(Ordering::Relaxed),
             publish_failures: self.inner.publish_failures.load(Ordering::Relaxed),
-            publish_superseded: self.inner.publish_superseded.load(Ordering::Relaxed),
-            automated_queue_capacity: self
-                .inner
-                .queue_configured_capacity
-                .automated
-                .load(Ordering::Relaxed),
-            priority_queue_capacity: self
-                .inner
-                .queue_configured_capacity
-                .priority
-                .load(Ordering::Relaxed),
-            effect_queue_capacity: self
-                .inner
-                .queue_configured_capacity
-                .effect
-                .load(Ordering::Relaxed),
+            jobs_dispatched: self.inner.jobs_dispatched.load(Ordering::Relaxed),
+            jobs_committed: self.inner.jobs_committed.load(Ordering::Relaxed),
+            jobs_failed: self.inner.jobs_failed.load(Ordering::Relaxed),
+            snooze_wakes: self.inner.snooze_wakes.load(Ordering::Relaxed),
+            snooze_sets: self.inner.snooze_sets.load(Ordering::Relaxed),
+            snooze_cancels: self.inner.snooze_cancels.load(Ordering::Relaxed),
+            snooze_invalid_wakes: self.inner.snooze_invalid_wakes.load(Ordering::Relaxed),
+            snooze_expirations: self.inner.snooze_expirations.load(Ordering::Relaxed),
+            automated_queue_capacity: self.inner.queue_configured_capacity.automated,
+            user_queue_capacity: self.inner.queue_configured_capacity.user,
+            job_queue_capacity: self.inner.queue_configured_capacity.job,
+            publish_queue_capacity: self.inner.queue_configured_capacity.publish,
+            snooze_queue_capacity: self.inner.queue_configured_capacity.snooze,
             retained_automated_keys: self.inner.retained_automated_keys.load(Ordering::Relaxed),
             in_flight_publish_attempts: self
                 .inner
                 .in_flight_publish_attempts
                 .load(Ordering::Relaxed),
+            in_flight_snooze_timers: self.inner.in_flight_snooze_timers.load(Ordering::Relaxed),
             confirmation_latency_ms: self
                 .inner
                 .confirmation_latency_ms
@@ -278,18 +406,14 @@ impl Metrics {
     }
 }
 
-impl Default for Metrics {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for QueueCapacityMetrics {
-    fn default() -> Self {
+impl From<&QueueCapacityConfig> for QueueCapacityMetrics {
+    fn from(value: &QueueCapacityConfig) -> Self {
         Self {
-            automated: AtomicUsize::new(0),
-            priority: AtomicUsize::new(0),
-            effect: AtomicUsize::new(0),
+            automated: value.automated,
+            user: value.user,
+            job: value.job,
+            publish: value.publish,
+            snooze: value.snooze,
         }
     }
 }

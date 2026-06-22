@@ -1,3 +1,5 @@
+//! Tests for `UserAction` state mapping and wake-time accessors.
+
 use super::*;
 use crate::proto::common::alarm::status::State;
 

@@ -3,5 +3,6 @@
 pub mod coordinator;
 pub mod ingress;
 pub mod messages;
+pub mod workflow;
 
 mod policy;

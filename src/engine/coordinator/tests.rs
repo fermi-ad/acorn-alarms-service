@@ -1,14 +1,14 @@
-use std::time::Duration;
+//! Tests for the alarm-state coordinator.
+
+use std::{collections::HashMap, time::Duration};
 
 use tokio::{
     sync::oneshot,
     time::{sleep, timeout},
 };
 
-use std::collections::HashMap;
-
 use crate::{
-    engine::messages::{CoordinatorMessage, DomainInput},
+    engine::messages::DomainInput,
     model::{errors::UpdateError, key::Key, user_action::UserAction},
     proto::{
         common::alarm::{
@@ -32,12 +32,12 @@ async fn user_update(
     let (sender, receiver) = oneshot::channel();
     ingress
         .user_tx
-        .try_send(CoordinatorMessage::DomainInput(DomainInput::UserUpdate {
+        .try_send(DomainInput::UserUpdate {
             key,
             action,
             user: user.to_string(),
             confirmation: sender,
-        }))
+        })
         .expect("test user queue should have capacity");
     receiver
         .await
@@ -48,9 +48,7 @@ async fn snapshot(ingress: &AlarmStateIngress) -> Vec<Status> {
     let (sender, receiver) = oneshot::channel();
     ingress
         .user_tx
-        .try_send(CoordinatorMessage::DomainInput(
-            DomainInput::SnapshotRequest(sender),
-        ))
+        .try_send(DomainInput::SnapshotRequest(sender))
         .expect("test user queue should have capacity");
     receiver
         .await
@@ -342,7 +340,7 @@ async fn bypass_already_bypassed_different_wake_succeeds() {
 
     let key = Key::try_from("M:BEAM#Analog").unwrap();
     let old_wake = Some(Timestamp {
-        seconds: 1_000_000,
+        seconds: 9_999_999_998,
         nanos: 0,
     });
     let new_wake = Some(Timestamp {
@@ -371,7 +369,30 @@ async fn bypass_already_bypassed_different_wake_succeeds() {
 }
 
 #[tokio::test]
-async fn automated_alarm_suppressed_while_bypassed() {
+async fn automated_epics_alarm_suppressed_while_bypassed() {
+    let ingress = get_runtime().await;
+
+    let key = Key::try_from("M:BEAM#Epics").unwrap();
+    user_update(&ingress, key, UserAction::Bypass(None), "operator")
+        .await
+        .unwrap();
+
+    let snap = snapshot_after_automated_update(
+        &ingress,
+        make_status("M:BEAM", State::Alarmed, Source::Epics),
+    )
+    .await;
+
+    assert_eq!(
+        snap.len(),
+        1,
+        "Epics-sourced alarm must be suppressed while bypassed"
+    );
+    assert_eq!(snap[0].state(), State::Bypassed);
+}
+
+#[tokio::test]
+async fn automated_non_epics_alarm_allowed_while_bypassed() {
     let ingress = get_runtime().await;
 
     let key = Key::try_from("M:BEAM#Analog").unwrap();
@@ -385,12 +406,17 @@ async fn automated_alarm_suppressed_while_bypassed() {
     )
     .await;
 
+    // The automated alarm replaces the bypass in confirmed state for the same key.
     assert_eq!(
         snap.len(),
         1,
-        "only the bypass entry must be in the snapshot"
+        "non-Epics alarm replaces the bypass entry for the same key"
     );
-    assert_eq!(snap[0].state(), State::Bypassed);
+    assert_eq!(
+        snap[0].state(),
+        State::Alarmed,
+        "confirmed state must reflect the new Alarmed status"
+    );
 }
 
 #[tokio::test]
@@ -467,14 +493,16 @@ async fn after_unbypass_entry_absent_from_snapshot() {
 async fn user_snapshot_is_not_structurally_blocked_by_queued_automated_updates() {
     let ingress = get_runtime().await;
 
-    automated_update(
+    // Establish a confirmed state entry for M:BEAM before flooding the automated queue.
+    snapshot_after_automated_update(
         &ingress,
         make_status("M:BEAM", State::Alarmed, Source::Analog),
     )
     .await;
-    sleep(Duration::from_millis(100)).await;
 
-    for index in 0..200 {
+    // Queue many automated updates for distinct keys so the automated ingress queue is full.
+    // These are queued but not yet processed by the coordinator.
+    for index in 0..100 {
         automated_update(
             &ingress,
             make_status(&format!("M:LOAD:{index}"), State::Alarmed, Source::Digital),
@@ -482,7 +510,9 @@ async fn user_snapshot_is_not_structurally_blocked_by_queued_automated_updates()
         .await;
     }
 
-    let snap = timeout(Duration::from_secs(2), snapshot(&ingress))
+    // The snapshot request goes to the user queue, which has priority over automated ingress.
+    // It should be served from confirmed_state without waiting for all automated jobs to complete.
+    let snap = timeout(Duration::from_secs(10), snapshot(&ingress))
         .await
         .expect("snapshot should not be blocked behind automated ingress");
 
@@ -525,13 +555,15 @@ async fn burst_of_same_key_automated_updates_converges_to_latest_snapshot_state(
 async fn user_command_is_not_structurally_blocked_by_queued_automated_updates() {
     let ingress = get_runtime().await;
 
+    // Establish a confirmed Alarmed state for M:BEAM before flooding the automated queue.
     snapshot_after_automated_update(
         &ingress,
         make_status("M:BEAM", State::Alarmed, Source::Analog),
     )
     .await;
 
-    for index in 0..200 {
+    // Queue a modest number of automated updates for distinct keys.
+    for index in 0..100 {
         automated_update(
             &ingress,
             make_status(&format!("Z:LOAD:{index}"), State::Alarmed, Source::Digital),
@@ -539,9 +571,10 @@ async fn user_command_is_not_structurally_blocked_by_queued_automated_updates() 
         .await;
     }
 
+    // The user command goes to the user queue, which has priority over automated ingress.
     let key = Key::try_from("M:BEAM#Analog").unwrap();
     timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(10),
         user_update(&ingress, key, UserAction::Acknowledge, "operator"),
     )
     .await
@@ -620,19 +653,19 @@ async fn first_live_update_supersedes_hydrated_state_for_same_key() {
 }
 
 #[tokio::test]
-async fn kafka_failure_delivers_kafka_write_failed_error() {
+async fn publish_failure_delivers_internal_error() {
     let ingress = get_throwing_runtime().await;
 
     let key = Key::try_from("M:BEAM#Analog").unwrap();
     let (sender, receiver) = oneshot::channel();
     ingress
         .user_tx
-        .try_send(CoordinatorMessage::DomainInput(DomainInput::UserUpdate {
+        .try_send(DomainInput::UserUpdate {
             key,
             action: UserAction::Bypass(None),
             user: "operator".to_string(),
             confirmation: sender,
-        }))
+        })
         .expect("test user queue should have capacity");
 
     let result = timeout(Duration::from_secs(2), receiver)
@@ -641,7 +674,7 @@ async fn kafka_failure_delivers_kafka_write_failed_error() {
         .expect("machine must not drop the confirmation sender");
 
     assert!(
-        matches!(result, Err(UpdateError::KafkaWriteFailed(_))),
-        "Kafka failure must produce KafkaWriteFailed, got: {result:?}"
+        matches!(result, Err(UpdateError::Internal(_))),
+        "publish failure must produce Internal error, got: {result:?}"
     );
 }

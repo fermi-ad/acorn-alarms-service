@@ -1,3 +1,5 @@
+//! Tests for EPICS startup hydration snapshot loading and reduction.
+
 use rust_pubsub_lib::{Message, PubSubError, Snapshot, StringMessage};
 
 use super::*;

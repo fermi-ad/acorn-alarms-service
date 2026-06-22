@@ -21,9 +21,7 @@ mod tests;
 /// # String representation
 ///
 /// [`std::fmt::Display`] serializes a [`Key`] as
-/// `"DEVICE_NAME#SourceVariant"` such as `"M:BEAM#Analog"`. This is the
-/// format used as the Kafka message key so consumers can identify which alarm a
-/// message belongs to.
+/// `"DEVICE_NAME#SourceVariant"` such as `"M:BEAM#Analog"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Key {
     /// Normalized device name.
@@ -73,7 +71,6 @@ impl TryFrom<&str> for Key {
 }
 
 impl std::fmt::Display for Key {
-    /// Serializes the key as `"DEVICE#SourceVariant"`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}#{:?}", self.device, self.source)
     }

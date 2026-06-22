@@ -1,11 +1,14 @@
 //! Policy helpers for automated alarm transitions and user-requested actions.
 
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     model::{key::Key, user_action::UserAction},
     proto::{
-        common::alarm::{Status, status::State},
+        common::alarm::{
+            Status,
+            status::{Source, State},
+        },
         google::protobuf::Timestamp,
     },
 };
@@ -15,17 +18,25 @@ mod tests;
 
 /// Returns whether an automated status update should be published.
 pub fn should_publish(prev: Option<&Status>, key: &Key, alarm: &Status) -> bool {
+    let next_state = alarm.state();
     if is_bypassed(prev) {
-        debug!(
+        if alarm.source() == Source::Epics && next_state != State::Unbypassed {
+            debug!(
+                target = "alarm_transition",
+                device = %key.device,
+                source = ?key.source,
+                "Skipping alarm due to source-specific bypass"
+            );
+            return false;
+        }
+        info!(
             target = "alarm_transition",
             device = %key.device,
             source = ?key.source,
-            "Skipping alarm due to source-specific bypass"
+            "Non-Bypass state received from automated source for Bypassed alarm."
         );
-        return false;
     }
 
-    let next_state = alarm.state();
     let next_severity = alarm.severity();
 
     let changed = prev.is_none_or(|prev_status| {
@@ -79,5 +90,7 @@ fn transition_allowed(prev: State, next: State) -> bool {
             | (State::Alarmed, State::Ok)
             | (State::Acknowledged, State::Ok)
             | (State::Acknowledged, State::Alarmed)
+            | (State::Bypassed, _)
+            | (State::Unknown, _)
     )
 }

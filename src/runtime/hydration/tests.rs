@@ -1,3 +1,5 @@
+//! Tests for startup hydration merging logic.
+
 use std::collections::HashMap;
 
 use super::*;
