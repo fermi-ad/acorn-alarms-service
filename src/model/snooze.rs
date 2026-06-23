@@ -1,4 +1,9 @@
-//! Snooze command and outcome types for the snooze scheduler protocol.
+//! `SnoozeInput`, `Snooze`, and `SnoozeOutcome` types for the snooze scheduler protocol.
+//!
+//! [`SnoozeInput`] is the external command type carried over the channel from the workflow handler
+//! to the snooze scheduler. The scheduler converts it to a [`Snooze`] decision internally before
+//! acting on it. [`SnoozeOutcome`] is returned for every command and emitted spontaneously when a
+//! timer fires.
 
 use crate::{model::key::Key, proto::google::protobuf::Timestamp};
 
@@ -31,7 +36,7 @@ impl From<SnoozeInput> for Snooze {
 pub enum SnoozeOutcome {
     /// A previously registered timer has elapsed.
     Expired { key: Key },
-    /// A `Snooze::Set` was rejected because the wake timestamp is not a valid future time.
+    /// A `SnoozeInput` with a `wake` timestamp that is not a valid future time was rejected.
     InvalidWake { key: Key },
     /// The command was accepted.
     Accepted { key: Key },

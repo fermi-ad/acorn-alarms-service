@@ -1,15 +1,16 @@
 //! Snooze scheduler — `DelayQueue`-backed per-key timer management.
 //!
-//! Accepts [`Snooze`] commands and maintains a [`DelayQueue`] of per-key timers. Emits
-//! [`SnoozeOutcome`] values in response to commands and when timers fire.
+//! Accepts [`SnoozeInput`] commands and maintains a [`DelayQueue`] of per-key timers. Emits
+//! [`SnoozeOutcome`] values in response to commands and when timers fire. Internally, each
+//! [`SnoozeInput`] is converted to a [`Snooze`] decision before being acted upon.
 //!
 //! ## Protocol
 //!
-//! - `Snooze::Set { key, wake }` — register (or replace) a timer for `key` that fires at `wake`.
-//!   Responds with `SnoozeOutcome::Accepted` on success or `SnoozeOutcome::InvalidWake` if the
-//!   timestamp is in the past or out of range.
-//! - `Snooze::Cancel { key }` — remove any existing timer for `key`.  Always responds with
-//!   `SnoozeOutcome::Accepted` (cancelling a non-existent timer is a no-op).
+//! - `SnoozeInput { key, wake: Some(timestamp) }` — register (or replace) a timer for `key` that
+//!   fires at `timestamp`. Responds with `SnoozeOutcome::Accepted` on success or
+//!   `SnoozeOutcome::InvalidWake` if the timestamp is in the past or out of range.
+//! - `SnoozeInput { key, wake: None }` — remove any existing timer for `key`. Always responds
+//!   with `SnoozeOutcome::Accepted` (cancelling a non-existent timer is a no-op).
 
 use std::{collections::HashMap, time::Duration};
 
@@ -50,7 +51,7 @@ impl SnoozeEffectPort {
 
 /// Run the snooze scheduler event loop.
 ///
-/// Accepts [`Snooze`] commands from `port` and maintains a [`DelayQueue`] of per-key timers.
+/// Accepts [`SnoozeInput`] commands from `port` and maintains a [`DelayQueue`] of per-key timers.
 /// When a timer fires, emits [`SnoozeOutcome::Expired`] so the workflow handler can synthesise a
 /// wake event for the coordinator.
 ///

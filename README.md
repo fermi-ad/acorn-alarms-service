@@ -50,7 +50,7 @@ The runtime wiring in [`src/runtime.rs`](src/runtime.rs) creates bounded channel
 - **user ingress queue** — carries `DomainInput` from the gRPC adapter to the coordinator
 - **job queue** — carries `Job` values from the coordinator to the workflow handler; outcomes flow back as `JobOutcome`
 - **publish queue** — carries `Publish` values from the workflow handler to the publish engine; outcomes flow back as `PublishOutcome`
-- **snooze queue** — carries `Snooze` commands from the workflow handler to the snooze scheduler; outcomes flow back as `SnoozeOutcome`
+- **snooze queue** — carries `SnoozeInput` commands from the workflow handler to the snooze scheduler; outcomes flow back as `SnoozeOutcome`
 
 Those queues connect the main subsystems:
 
@@ -106,7 +106,7 @@ flowchart TD
 ### Effects
 
 - [`src/effects/publish.rs`](src/effects/publish.rs): Kafka publish worker, retry and batching of automated outcomes; receives `Publish` values and returns `PublishOutcome` values carrying `Key` results
-- [`src/effects/snooze.rs`](src/effects/snooze.rs): snooze scheduler, `DelayQueue`-backed per-key timer management; accepts `Snooze` commands and emits `SnoozeOutcome` values
+- [`src/effects/snooze.rs`](src/effects/snooze.rs): snooze scheduler, `DelayQueue`-backed per-key timer management; accepts `SnoozeInput` commands and emits `SnoozeOutcome` values
 - [`src/effects.rs`](src/effects.rs): effect module exports
 
 ### Domain model
@@ -114,7 +114,7 @@ flowchart TD
 - [`src/model/key.rs`](src/model/key.rs): normalized alarm identity and `DEVICE#Source` parsing/formatting
 - [`src/model/user_action.rs`](src/model/user_action.rs): user actions and their target states
 - [`src/model/publish.rs`](src/model/publish.rs): `Publish` request, `PublishAttempt`, and `PublishOutcome` types; `PublishResult` is `SymmetricalResult<Key>`
-- [`src/model/snooze.rs`](src/model/snooze.rs): `Snooze` command and `SnoozeOutcome` types for the snooze scheduler protocol
+- [`src/model/snooze.rs`](src/model/snooze.rs): `SnoozeInput` (the channel command), `Snooze` (the internal decision type derived from it), and `SnoozeOutcome` types for the snooze scheduler protocol
 - [`src/model/errors.rs`](src/model/errors.rs): `UpdateError` (including `UpdateError::Internal`), `SymmetricalResult<T>`, and `StateTransition`
 - [`src/model.rs`](src/model.rs): model module exports
 
@@ -202,8 +202,8 @@ The coordinator reconciles each `JobOutcome`:
 
 The snooze scheduler in [`src/effects/snooze.rs`](src/effects/snooze.rs) maintains a `DelayQueue` of per-key timers.
 
-- `Snooze::Set { key, wake }` registers (or replaces) a timer for `key` that fires at the `wake` timestamp. If the timestamp is in the past or out of range, the scheduler responds with `SnoozeOutcome::InvalidWake` instead of `SnoozeOutcome::Accepted`.
-- `Snooze::Cancel { key }` removes any existing timer for `key`. Cancelling a non-existent timer is a no-op and still responds with `SnoozeOutcome::Accepted`.
+- `SnoozeInput { key, wake: Some(timestamp) }` registers (or replaces) a timer for `key` that fires at the given timestamp. If the timestamp is in the past or out of range, the scheduler responds with `SnoozeOutcome::InvalidWake` instead of `SnoozeOutcome::Accepted`.
+- `SnoozeInput { key, wake: None }` removes any existing timer for `key`. Cancelling a non-existent timer is a no-op and still responds with `SnoozeOutcome::Accepted`.
 - When a timer fires, the scheduler emits `SnoozeOutcome::Expired { key }`.
 
 ## Runtime behavior that matters
