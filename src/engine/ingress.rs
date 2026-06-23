@@ -12,10 +12,7 @@ use tokio::sync::{
 };
 
 use crate::{
-    engine::messages::{CoordinatorMessage, DomainInput},
-    metrics::Metrics,
-    model::key::Key,
-    proto::common::alarm::Status,
+    engine::messages::DomainInput, metrics::Metrics, model::key::Key, proto::common::alarm::Status,
 };
 
 #[cfg(test)]
@@ -36,7 +33,7 @@ struct OverloadState {
 /// Handle for automated alarm updates entering the coordinator.
 #[derive(Clone)]
 pub struct AutomatedIngressHandle {
-    coordinator_tx: mpsc::Sender<CoordinatorMessage>,
+    coordinator_tx: mpsc::Sender<DomainInput>,
     overload_notify: Arc<Notify>,
     overload_state: Arc<Mutex<OverloadState>>,
     metrics: Metrics,
@@ -44,7 +41,7 @@ pub struct AutomatedIngressHandle {
 
 impl AutomatedIngressHandle {
     /// Creates a new automated ingress handle and starts the overload drain task.
-    pub fn new(tx: mpsc::Sender<CoordinatorMessage>, metrics: Metrics) -> Self {
+    pub fn new(tx: mpsc::Sender<DomainInput>, metrics: Metrics) -> Self {
         let overload_tx = tx.clone();
 
         let overload_notify = Arc::new(Notify::new());
@@ -101,7 +98,7 @@ impl AutomatedIngressHandle {
         }
 
         drop(overload_state);
-        let message = CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status.clone()));
+        let message = DomainInput::AutomatedUpdate(status.clone());
         match self.coordinator_tx.try_send(message) {
             Ok(()) => Ok(()),
             Err(TrySendError::Closed(_)) => Err(SendError(status)),
@@ -128,7 +125,7 @@ impl AutomatedIngressHandle {
 /// reinserted into the pending map and will be sent on a later pass.
 async fn run_overload_drain_loop(
     notify: Arc<Notify>,
-    coordinator_tx: mpsc::Sender<CoordinatorMessage>,
+    coordinator_tx: mpsc::Sender<DomainInput>,
     overload_state: Arc<Mutex<OverloadState>>,
     metrics: Metrics,
 ) {
@@ -141,7 +138,7 @@ async fn run_overload_drain_loop(
             metrics.record_retained_automated_keys(overload_state.pending.len());
             if let Some((_, status)) = next {
                 drop(overload_state);
-                let message = CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status));
+                let message = DomainInput::AutomatedUpdate(status);
                 let result = coordinator_tx.send(message).await;
                 if result.is_err() {
                     // The coordinator has shut down!
@@ -162,13 +159,13 @@ async fn run_overload_drain_loop(
 /// Handle for user-driven commands entering the coordinator.
 #[derive(Clone)]
 pub struct UserIngressHandle {
-    tx: mpsc::Sender<CoordinatorMessage>,
+    tx: mpsc::Sender<DomainInput>,
     metrics: Metrics,
 }
 
 impl UserIngressHandle {
     /// Creates a new user ingress handle.
-    pub fn new(tx: mpsc::Sender<CoordinatorMessage>, metrics: Metrics) -> Self {
+    pub fn new(tx: mpsc::Sender<DomainInput>, metrics: Metrics) -> Self {
         Self { tx, metrics }
     }
 
@@ -176,7 +173,7 @@ impl UserIngressHandle {
     ///
     /// Overload policy: bounded-and-reject. gRPC handlers use [`UserIngressHandle::try_send`] so
     /// callers receive an explicit overload error instead of waiting behind storm traffic.
-    pub fn try_send(&self, message: CoordinatorMessage) -> Result<(), ChannelSendError> {
+    pub fn try_send(&self, message: DomainInput) -> Result<(), ChannelSendError> {
         self.tx.try_send(message).map_err(|e| match e {
             TrySendError::Closed(_) => ChannelSendError::Closed,
             TrySendError::Full(_) => {

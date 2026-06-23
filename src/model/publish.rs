@@ -1,12 +1,13 @@
-//! Types describing publish requests, retries, and outcomes.
+//! Types describing publish requests, retry attempts, and outcomes.
 
-use crate::{model::key::Key, proto::common::alarm::Status};
+use crate::{
+    model::{errors::SymmetricalResult, key::Key},
+    proto::common::alarm::Status,
+};
 
 /// Shared details carried by each publish request.
 #[derive(Clone)]
 pub struct PublishDetails {
-    /// Monotonic identifier for the publish request.
-    pub id: u64,
     /// Alarm identity associated with the publish.
     pub key: Key,
     /// Alarm status payload to publish.
@@ -68,11 +69,6 @@ impl PublishAttempt {
         self.request.details_ref()
     }
 
-    /// Consumes the attempt and returns the underlying publish request.
-    pub fn into_request(self) -> Publish {
-        self.request
-    }
-
     /// Increments the attempt count, saturating at the maximum [`u8`] value.
     pub fn increment_attempt(&mut self) {
         self.attempt_count = self.attempt_count.saturating_add(1);
@@ -87,5 +83,9 @@ pub enum PublishOutcome {
     Single(PublishResult),
 }
 
-/// Result type for a publish attempt.
-pub type PublishResult = Result<PublishAttempt, PublishAttempt>;
+/// Result type for a completed publish attempt.
+///
+/// Both the success and failure paths carry the [`Key`] that was published. Use
+/// [`SymmetricalResult::is_ok`] to distinguish success from failure and
+/// [`SymmetricalResult::into_inner`] to recover the key.
+pub type PublishResult = SymmetricalResult<Key>;

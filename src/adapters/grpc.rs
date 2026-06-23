@@ -10,7 +10,7 @@ use tracing::{debug, error, warn};
 use crate::{
     engine::{
         ingress::{ChannelSendError, UserIngressHandle},
-        messages::{CoordinatorMessage, DomainInput},
+        messages::DomainInput,
     },
     metrics::Metrics,
     model::{errors::UpdateError, key::Key, user_action::UserAction},
@@ -28,6 +28,10 @@ mod tests;
 
 type Confirmation = oneshot::Receiver<Result<(), UpdateError>>;
 
+/// gRPC service implementation for alarm commands.
+///
+/// Receives user-driven alarm commands from gRPC clients and forwards them to the coordinator
+/// via the [`UserIngressHandle`]. Metrics are recorded for each confirmation round-trip.
 pub struct AlarmCommandsService {
     pub user_channel: UserIngressHandle,
     pub metrics: Metrics,
@@ -59,14 +63,12 @@ impl AlarmCommandsService {
             let (sender, receiver) = oneshot::channel();
             results_fut.push(receiver);
 
-            if let Err(e) = self.user_channel.try_send(CoordinatorMessage::DomainInput(
-                DomainInput::UserUpdate {
-                    key: key.clone(),
-                    action,
-                    user: user.to_string(),
-                    confirmation: sender,
-                },
-            )) {
+            if let Err(e) = self.user_channel.try_send(DomainInput::UserUpdate {
+                key: key.clone(),
+                action,
+                user: user.to_string(),
+                confirmation: sender,
+            }) {
                 return Err(map_user_send_error(e));
             }
         }
@@ -143,9 +145,10 @@ impl AlarmCommands for AlarmCommandsService {
     ) -> Result<Response<SnapshotResponse>, TonicStatus> {
         debug!("Snapshot requested");
         let (sender, receiver) = oneshot::channel();
-        if let Err(e) = self.user_channel.try_send(CoordinatorMessage::DomainInput(
-            DomainInput::SnapshotRequest(sender),
-        )) {
+        if let Err(e) = self
+            .user_channel
+            .try_send(DomainInput::SnapshotRequest(sender))
+        {
             return Err(map_user_send_error(e));
         }
         match receiver.await {
@@ -200,7 +203,7 @@ async fn handle_confirmation(
                 ));
             }
             Ok(Err(e)) => match e {
-                UpdateError::KafkaWriteFailed(_) => {
+                UpdateError::Internal(_) => {
                     internal_errs.push(e.to_string());
                 }
                 UpdateError::StateNotAllowed(_) => {

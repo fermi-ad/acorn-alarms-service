@@ -32,10 +32,14 @@ const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
 const ALARMS_AUTOMATED_QUEUE_CAPACITY: &str = "ALARMS_AUTOMATED_QUEUE_CAPACITY";
 const AUTOMATED_CAP_DEFAULT: usize = 4096;
-const ALARMS_PRIORITY_QUEUE_CAPACITY: &str = "ALARMS_PRIORITY_QUEUE_CAPACITY";
-const PRIORITY_CAP_DEFAULT: usize = 128;
-const ALARMS_EFFECT_QUEUE_CAPACITY: &str = "ALARMS_EFFECT_QUEUE_CAPACITY";
-const EFFECT_CAP_DEFAULT: usize = 4096;
+const ALARMS_JOB_QUEUE_CAPACITY: &str = "ALARMS_JOB_QUEUE_CAPACITY";
+const JOB_CAP_DEFAULT: usize = 4096;
+const ALARMS_USER_QUEUE_CAPACITY: &str = "ALARMS_USER_QUEUE_CAPACITY";
+const USER_CAP_DEFAULT: usize = 128;
+const ALARMS_PUBLISH_QUEUE_CAPACITY: &str = "ALARMS_PUBLISH_QUEUE_CAPACITY";
+const PUBLISH_CAP_DEFAULT: usize = 4096;
+const ALARMS_SNOOZE_QUEUE_CAPACITY: &str = "ALARMS_SNOOZE_QUEUE_CAPACITY";
+const SNOOZE_CAP_DEFAULT: usize = 128;
 const ALARMS_METRICS_LOG_INTERVAL_SECS: &str = "ALARMS_METRICS_LOG_INTERVAL_SECS";
 const METRICS_LOG_INTERVAL_DEFAULT_SECS: u64 = 30;
 
@@ -122,12 +126,16 @@ fn get_metrics_log_interval() -> Duration {
 
 fn get_queue_sizes() -> QueueCapacityConfig {
     let automated = env_var::get(ALARMS_AUTOMATED_QUEUE_CAPACITY).or(AUTOMATED_CAP_DEFAULT);
-    let priority = env_var::get(ALARMS_PRIORITY_QUEUE_CAPACITY).or(PRIORITY_CAP_DEFAULT);
-    let effect = env_var::get(ALARMS_EFFECT_QUEUE_CAPACITY).or(EFFECT_CAP_DEFAULT);
+    let user = env_var::get(ALARMS_USER_QUEUE_CAPACITY).or(USER_CAP_DEFAULT);
+    let job = env_var::get(ALARMS_JOB_QUEUE_CAPACITY).or(JOB_CAP_DEFAULT);
+    let publish = env_var::get(ALARMS_PUBLISH_QUEUE_CAPACITY).or(PUBLISH_CAP_DEFAULT);
+    let snooze = env_var::get(ALARMS_SNOOZE_QUEUE_CAPACITY).or(SNOOZE_CAP_DEFAULT);
 
     QueueCapacityConfig {
         automated,
-        priority,
-        effect,
+        user,
+        job,
+        publish,
+        snooze,
     }
 }

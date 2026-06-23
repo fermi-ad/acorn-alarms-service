@@ -1,3 +1,5 @@
+//! Tests for the gRPC alarm commands service adapter.
+
 use std::time::Duration;
 
 use tokio::{sync::mpsc, time::sleep};
@@ -5,6 +7,7 @@ use tonic::Request;
 
 use super::*;
 use crate::{
+    engine::messages::DomainInput,
     proto::{
         common::alarm::{
             Status,
@@ -15,7 +18,7 @@ use crate::{
             AcknowledgeRequest, ActivateRequest, BypassRequest, SnoozeRequest,
         },
     },
-    test_utils::get_runtime,
+    test_utils::{DEFAULT_TEST_QUEUE_CONFIG, get_runtime},
 };
 
 async fn make_service() -> AlarmCommandsService {
@@ -344,10 +347,10 @@ async fn get_snapshot_after_automated_alarm_contains_alarm() {
 
 #[tokio::test]
 async fn dropped_state_channel_returns_internal_error() {
-    let (tx, rx) = mpsc::channel::<CoordinatorMessage>(1);
+    let (tx, rx) = mpsc::channel::<DomainInput>(1);
     drop(rx);
 
-    let metrics = Metrics::new();
+    let metrics = Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG);
     let svc = AlarmCommandsService {
         user_channel: UserIngressHandle::new(tx, metrics.clone()),
         metrics,
@@ -367,14 +370,15 @@ async fn dropped_state_channel_returns_internal_error() {
 #[tokio::test]
 async fn full_user_queue_returns_resource_exhausted() {
     let queue_capacity = 1;
-    let (tx, _rx) = mpsc::channel::<CoordinatorMessage>(queue_capacity);
+    let (tx, _rx) = mpsc::channel::<DomainInput>(queue_capacity);
     for index in 0..queue_capacity {
-        tx.try_send(CoordinatorMessage::DomainInput(
-            DomainInput::AutomatedUpdate(alarmed_status(&format!("DEV{index}"), Source::Analog)),
-        ))
+        tx.try_send(DomainInput::AutomatedUpdate(alarmed_status(
+            &format!("DEV{index}"),
+            Source::Analog,
+        )))
         .expect("queue should accept messages until capacity is reached");
     }
-    let metrics = Metrics::new();
+    let metrics = Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG);
     let svc = AlarmCommandsService {
         user_channel: UserIngressHandle::new(tx, metrics.clone()),
         metrics,

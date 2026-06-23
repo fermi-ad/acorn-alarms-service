@@ -17,8 +17,10 @@ use crate::{
 
 pub const DEFAULT_TEST_QUEUE_CONFIG: QueueCapacityConfig = QueueCapacityConfig {
     automated: 10,
-    priority: 10,
-    effect: 10,
+    user: 10,
+    job: 10,
+    publish: 10,
+    snooze: 10,
 };
 
 /// Test publisher that records the latest published message and can simulate failures.

@@ -1,8 +1,6 @@
-use super::*;
+//! Tests for alarm transition and user-action policy helpers.
 
-// ---------------------------------------------------------------------------
-// transition_allowed
-// ---------------------------------------------------------------------------
+use super::*;
 
 #[test]
 fn ok_to_alarmed_is_allowed() {
@@ -50,13 +48,24 @@ fn alarmed_to_acknowledged_is_not_allowed_via_automated() {
 }
 
 #[test]
-fn bypassed_to_alarmed_is_not_allowed_via_automated() {
-    assert!(!transition_allowed(State::Bypassed, State::Alarmed));
+fn bypassed_to_alarmed_is_allowed() {
+    assert!(transition_allowed(State::Bypassed, State::Alarmed));
 }
 
-// ---------------------------------------------------------------------------
-// user_action_allowed
-// ---------------------------------------------------------------------------
+#[test]
+fn bypassed_to_ok_is_allowed() {
+    assert!(transition_allowed(State::Bypassed, State::Ok));
+}
+
+#[test]
+fn unknown_to_alarmed_is_allowed() {
+    assert!(transition_allowed(State::Unknown, State::Alarmed));
+}
+
+#[test]
+fn unknown_to_ok_is_allowed() {
+    assert!(transition_allowed(State::Unknown, State::Ok));
+}
 
 #[test]
 fn acknowledge_alarmed_is_allowed() {
@@ -183,4 +192,50 @@ fn unbypass_non_bypassed_is_not_allowed() {
         None,
         &UserAction::Activate
     ));
+}
+
+fn make_status(source: Source, state: State) -> Status {
+    Status {
+        device: "M:BEAM".to_string(),
+        state: state as i32,
+        source: source as i32,
+        ..Status::default()
+    }
+}
+
+fn beam_analog_key() -> Key {
+    Key::try_from("M:BEAM#Analog").unwrap()
+}
+
+#[test]
+fn should_publish_epics_source_bypassed_alarm_is_suppressed() {
+    let prev = make_status(Source::Epics, State::Bypassed);
+    let next = make_status(Source::Epics, State::Alarmed);
+    let key = Key::try_from("M:BEAM#Epics").unwrap();
+    assert!(
+        !should_publish(Some(&prev), &key, &next),
+        "Epics-sourced alarm while bypassed must be suppressed"
+    );
+}
+
+#[test]
+fn should_publish_non_epics_source_bypassed_alarm_is_allowed() {
+    let prev = make_status(Source::Analog, State::Bypassed);
+    let next = make_status(Source::Analog, State::Alarmed);
+    let key = beam_analog_key();
+    assert!(
+        should_publish(Some(&prev), &key, &next),
+        "non-Epics alarm while bypassed must be allowed through"
+    );
+}
+
+#[test]
+fn should_publish_unbypassed_from_epics_while_bypassed_is_allowed() {
+    let prev = make_status(Source::Epics, State::Bypassed);
+    let next = make_status(Source::Epics, State::Unbypassed);
+    let key = Key::try_from("M:BEAM#Epics").unwrap();
+    assert!(
+        should_publish(Some(&prev), &key, &next),
+        "Unbypassed from Epics while bypassed must be allowed through"
+    );
 }

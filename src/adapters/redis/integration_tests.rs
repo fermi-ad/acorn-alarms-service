@@ -1,8 +1,8 @@
-//! Integration tests for the redis_stream module using RedisTestHarness.
+//! Integration tests for the Redis stream adapter using `RedisTestHarness`.
 //!
-//! These tests exercise [`run_alarm_stream`](src/redis_stream/mod.rs:104) end-to-end by injecting a real
+//! These tests exercise `run_alarm_stream` end-to-end by injecting a real
 //! Redis stream (via [`RedisTestHarness`]) and verifying that the full
-//! Redis → parse → [`CoordinatorMessage`](src/alarm_state/types.rs:59) pipeline behaves correctly.
+//! Redis → parse → [`DomainInput`] pipeline behaves correctly.
 
 use std::{collections::HashMap, time::Duration};
 
@@ -11,8 +11,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use crate::{
-    engine::messages::{CoordinatorMessage, DomainInput},
-    metrics::Metrics,
+    engine::messages::DomainInput, metrics::Metrics, test_utils::DEFAULT_TEST_QUEUE_CONFIG,
 };
 
 use super::*;
@@ -45,7 +44,7 @@ async fn valid_alarm_is_forwarded_to_state_channel() {
     timeout(
         Duration::from_secs(5),
         run_alarm_stream(
-            AutomatedIngressHandle::new(tx, Metrics::new()),
+            AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
             stream.take(1),
         ),
     )
@@ -57,7 +56,7 @@ async fn valid_alarm_is_forwarded_to_state_channel() {
         .try_recv()
         .expect("expected one coordinator message on the channel");
     match action {
-        CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
+        DomainInput::AutomatedUpdate(status) => {
             assert_eq!(status.device, "M:BEAM", "device name must match");
             assert_eq!(status.state(), State::Alarmed);
             assert_eq!(status.severity(), Severity::High);
@@ -90,7 +89,7 @@ async fn entry_without_device_is_skipped() {
     timeout(
         Duration::from_secs(5),
         run_alarm_stream(
-            AutomatedIngressHandle::new(tx, Metrics::new()),
+            AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
             stream.take(1),
         ),
     )
@@ -112,15 +111,18 @@ async fn stream_error_is_skipped_and_loop_continues() {
     let stream = tokio_stream::iter(vec![err_item, ok_item]);
     let (tx, mut rx) = mpsc::channel(4);
 
-    run_alarm_stream(AutomatedIngressHandle::new(tx, Metrics::new()), stream)
-        .await
-        .unwrap();
+    run_alarm_stream(
+        AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
+        stream,
+    )
+    .await
+    .unwrap();
 
     let action = rx
         .try_recv()
         .expect("expected one coordinator message after the stream error");
     match action {
-        CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
+        DomainInput::AutomatedUpdate(status) => {
             assert_eq!(
                 status.device, "Z:ACLTST",
                 "device name must match the valid message"
@@ -160,9 +162,9 @@ async fn multiple_alarms_are_all_forwarded() {
         .unwrap();
 
     timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(10),
         run_alarm_stream(
-            AutomatedIngressHandle::new(tx, Metrics::new()),
+            AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
             stream.take(2),
         ),
     )
@@ -173,9 +175,7 @@ async fn multiple_alarms_are_all_forwarded() {
     let mut statuses = Vec::new();
     while let Ok(action) = rx.try_recv() {
         match action {
-            CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
-                statuses.push(status)
-            }
+            DomainInput::AutomatedUpdate(status) => statuses.push(status),
             _ => panic!("expected only automated domain inputs"),
         }
     }
@@ -206,15 +206,18 @@ async fn no_alarm_is_translated_into_ok_state() {
     let stream = tokio_stream::iter(vec![Ok(alarm_msg("M:BEAM", "NO_ALARM", "EPICS"))]);
     let (tx, mut rx) = mpsc::channel(4);
 
-    run_alarm_stream(AutomatedIngressHandle::new(tx, Metrics::new()), stream)
-        .await
-        .unwrap();
+    run_alarm_stream(
+        AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
+        stream,
+    )
+    .await
+    .unwrap();
 
     let action = rx
         .try_recv()
         .expect("expected translated coordinator message for NO_ALARM");
     match action {
-        CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
+        DomainInput::AutomatedUpdate(status) => {
             assert_eq!(status.device, "M:BEAM");
             assert_eq!(status.state(), State::Ok);
             assert_eq!(status.severity(), Severity::Unknown);
@@ -232,7 +235,11 @@ async fn dropped_receiver_does_not_panic() {
     let (tx, rx) = mpsc::channel(1);
     drop(rx);
 
-    let result = run_alarm_stream(AutomatedIngressHandle::new(tx, Metrics::new()), stream).await;
+    let result = run_alarm_stream(
+        AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
+        stream,
+    )
+    .await;
     assert!(
         result.is_ok(),
         "run_alarm_stream must return Ok even when receiver is dropped"

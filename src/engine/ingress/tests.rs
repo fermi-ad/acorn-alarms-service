@@ -1,19 +1,23 @@
-use super::*;
-use crate::{
-    metrics::Metrics,
-    model::user_action::UserAction,
-    proto::common::alarm::status::{Severity, Source, State},
-    test_utils::{get_runtime, make_status},
-};
+//! Tests for the automated and user ingress handles.
+
 use tokio::{
     sync::{mpsc, oneshot},
     time::{Duration, timeout},
 };
 
+use super::*;
+use crate::{
+    engine::messages::DomainInput,
+    metrics::Metrics,
+    model::user_action::UserAction,
+    proto::common::alarm::status::{Severity, Source, State},
+    test_utils::{DEFAULT_TEST_QUEUE_CONFIG, get_runtime, make_status},
+};
+
 #[tokio::test]
 async fn automated_ingress_coalesces_latest_status_for_same_key_when_queue_is_full() {
     let (tx, mut rx) = mpsc::channel(1);
-    let handle = AutomatedIngressHandle::new(tx, Metrics::new());
+    let handle = AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG));
 
     let mut first = make_status("M:BEAM", State::Alarmed, Source::Analog);
     first.severity = Severity::Unknown as i32;
@@ -34,7 +38,7 @@ async fn automated_ingress_coalesces_latest_status_for_same_key_when_queue_is_fu
         .expect("first queued message should arrive")
         .expect("channel should stay open");
     match queued {
-        CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
+        DomainInput::AutomatedUpdate(status) => {
             assert_eq!(status.severity(), Severity::Unknown);
         }
         _ => panic!("expected automated update"),
@@ -45,7 +49,7 @@ async fn automated_ingress_coalesces_latest_status_for_same_key_when_queue_is_fu
         .expect("coalesced latest message should arrive")
         .expect("channel should stay open");
     match latest {
-        CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => {
+        DomainInput::AutomatedUpdate(status) => {
             assert_eq!(status.severity(), Severity::Low);
         }
         _ => panic!("expected automated update"),
@@ -60,25 +64,22 @@ async fn user_queue_rejects_when_full() {
         let (sender, _receiver) = oneshot::channel();
         ingress
             .user_tx
-            .try_send(CoordinatorMessage::DomainInput(DomainInput::UserUpdate {
+            .try_send(DomainInput::UserUpdate {
                 key: Key::try_from(format!("DEV{index}#Analog").as_str()).unwrap(),
                 action: UserAction::Bypass(None),
                 user: "operator".to_string(),
                 confirmation: sender,
-            }))
+            })
             .expect("queue should accept messages until capacity is reached");
     }
 
     let (sender, _receiver) = oneshot::channel();
-    let result =
-        ingress
-            .user_tx
-            .try_send(CoordinatorMessage::DomainInput(DomainInput::UserUpdate {
-                key: Key::try_from("OVERFLOW#Analog").unwrap(),
-                action: UserAction::Bypass(None),
-                user: "operator".to_string(),
-                confirmation: sender,
-            }));
+    let result = ingress.user_tx.try_send(DomainInput::UserUpdate {
+        key: Key::try_from("OVERFLOW#Analog").unwrap(),
+        action: UserAction::Bypass(None),
+        user: "operator".to_string(),
+        confirmation: sender,
+    });
 
     assert!(
         result.is_err(),
@@ -89,7 +90,7 @@ async fn user_queue_rejects_when_full() {
 #[tokio::test]
 async fn automated_ingress_does_not_coalesce_distinct_keys() {
     let (tx, mut rx) = mpsc::channel(1);
-    let handle = AutomatedIngressHandle::new(tx, Metrics::new());
+    let handle = AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG));
 
     handle
         .send_automated_update(make_status("M:BEAM", State::Alarmed, Source::Analog))
@@ -112,7 +113,7 @@ async fn automated_ingress_does_not_coalesce_distinct_keys() {
     let devices = [first, second]
         .into_iter()
         .map(|message| match message {
-            CoordinatorMessage::DomainInput(DomainInput::AutomatedUpdate(status)) => status.device,
+            DomainInput::AutomatedUpdate(status) => status.device,
             _ => panic!("expected automated update"),
         })
         .collect::<Vec<_>>();

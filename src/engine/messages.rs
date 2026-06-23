@@ -1,16 +1,15 @@
-//! Shared message types exchanged between engine ingress, coordination, and effects.
+//! Domain input types accepted by the coordinator from ingress adapters.
+//!
+//! This module contains [`DomainInput`] and its supporting types. These are the only messages
+//! that flow from the ingress layer into the coordinator; effect results and job outcomes travel
+//! on separate channels and are not part of this module.
 
 use std::collections::HashMap;
 
 use tokio::sync::oneshot;
 
 use crate::{
-    model::{
-        errors::UpdateError,
-        key::Key,
-        publish::{Publish, PublishOutcome},
-        user_action::UserAction,
-    },
+    model::{errors::UpdateError, key::Key, user_action::UserAction},
     proto::common::alarm::Status,
 };
 
@@ -33,20 +32,4 @@ pub enum DomainInput {
         user: String,
         confirmation: Confirmation,
     },
-}
-
-/// Effects emitted by the coordinator for downstream execution.
-pub enum DomainEffect {
-    Publish(Publish),
-}
-
-/// Results returned from effect execution back into the coordinator.
-pub enum EffectResult {
-    Publish(PublishOutcome),
-}
-
-/// Top-level messages routed into the coordinator.
-pub enum CoordinatorMessage {
-    DomainInput(DomainInput),
-    EffectResult(EffectResult),
 }

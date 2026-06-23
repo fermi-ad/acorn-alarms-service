@@ -7,7 +7,9 @@ The codebase is organized around a small event-driven runtime:
 - Redis ingestion turns external alarm events into internal domain input
 - gRPC handlers turn operator requests into internal domain input
 - a coordinator owns alarm-state decisions and reconciliation
+- a workflow handler sequences per-key effect pipelines between the coordinator and effect workers
 - a publish engine owns Kafka delivery and retry behavior
+- a snooze scheduler owns per-key timer management for bypass wake-up events
 
 This README describes the repository as it exists now: module layout, runtime behavior, configuration, and the places maintainers should start when changing behavior.
 
@@ -21,12 +23,15 @@ At a high level, the service:
 - applies transition policy before emitting updates
 - publishes alarm status records to Kafka as JSON payloads keyed by alarm identity
 - keeps in-memory confirmed and speculative caches so publish outcomes can be reconciled safely
-- records low-cardinality in-process metrics about overload, retries, and latency
+- manages per-key snooze timers so bypassed alarms can automatically unbypass at a scheduled time
+- records low-cardinality in-process metrics about overload, retries, latency, and workflow throughput
 
 The main architectural boundary is between domain logic and transport logic:
 
 - the coordinator decides what state the service wants to publish
-- the publish engine decides how that state gets delivered
+- the workflow handler sequences the per-key effect pipeline
+- the publish engine decides how that state gets delivered to Kafka
+- the snooze scheduler manages per-key wake-up timers
 
 ## Runtime architecture
 
@@ -39,25 +44,47 @@ At startup, [`src/main.rs`](src/main.rs) does six things:
 5. starts the runtime in [`src/runtime.rs`](src/runtime.rs) with hydrated confirmed state
 6. spawns the gRPC server, Redis reader restart loop, and periodic metrics logging task
 
-The runtime wiring in [`src/runtime.rs`](src/runtime.rs) creates three bounded channels:
+The runtime wiring in [`src/runtime.rs`](src/runtime.rs) creates bounded channel pairs for each subsystem connection:
 
-- automated ingress queue for Redis-driven alarm updates
-- priority ingress queue for user commands and effect results
-- effect queue for downstream publish work
+- **automated ingress queue** — carries `DomainInput` from the Redis adapter to the coordinator
+- **user ingress queue** — carries `DomainInput` from the gRPC adapter to the coordinator
+- **job queue** — carries `Job` values from the coordinator to the workflow handler; outcomes flow back as `JobOutcome`
+- **publish queue** — carries `Publish` values from the workflow handler to the publish engine; outcomes flow back as `PublishOutcome`
+- **snooze queue** — carries `SnoozeInput` commands from the workflow handler to the snooze scheduler; outcomes flow back as `SnoozeOutcome`
 
 Those queues connect the main subsystems:
 
-1. adapters convert external traffic into internal messages
-2. the coordinator decides whether state should change and emits publish effects
-3. the publish engine performs Kafka writes and returns success/failure outcomes
-4. the coordinator reconciles those outcomes into confirmed state and user confirmations
+1. adapters convert external traffic into internal `DomainInput` messages
+2. the coordinator decides whether state should change and emits `Job` values to the workflow handler
+3. the workflow handler sequences each job through the effect pipeline defined in `WORKFLOW_ORDER`
+4. the snooze scheduler registers or cancels per-key timers and emits `SnoozeOutcome` values
+5. the publish engine performs Kafka writes and returns `PublishOutcome` values
+6. the workflow handler translates outcomes into `JobOutcome` values and sends them back to the coordinator
+7. the coordinator reconciles `JobOutcome` values into confirmed state and user confirmations
+
+### Runtime architecture diagram
+
+```
+flowchart TD
+    Redis[Redis Stream] -->|Status| AutoIngress[AutomatedIngressHandle]
+    gRPC[gRPC Adapter] -->|DomainInput| UserIngress[UserIngressHandle]
+    AutoIngress -->|DomainInput - automated| Coordinator[AlarmStateCoordinator]
+    UserIngress -->|DomainInput - user| Coordinator
+    Coordinator -->|Job| WorkflowHandler[WorkflowHandler]
+    WorkflowHandler -->|Snooze| SnoozeScheduler[SnoozeScheduler]
+    SnoozeScheduler -->|SnoozeOutcome| WorkflowHandler
+    WorkflowHandler -->|Publish| PublishEngine[PublishEngine]
+    PublishEngine -->|PublishOutcome| WorkflowHandler
+    WorkflowHandler -->|JobOutcome| Coordinator
+    Coordinator -->|Snapshot / Confirmation| gRPC
+```
 
 ## Repository map
 
 ### Entrypoints and runtime
 
 - [`src/main.rs`](src/main.rs): process entrypoint, tracing setup, startup hydration, Kafka publisher creation, queue sizing, metrics logging, gRPC server startup, Redis reader restart loop
-- [`src/runtime.rs`](src/runtime.rs): runtime wiring, queue sizing types, task startup, ingress handles returned to adapters
+- [`src/runtime.rs`](src/runtime.rs): runtime wiring, channel topology, queue sizing types, task startup, ingress handles returned to adapters
 - [`src/runtime/hydration.rs`](src/runtime/hydration.rs): startup hydration assembly, merge rules, and hydration error types
 
 ### Adapters
@@ -69,28 +96,31 @@ Those queues connect the main subsystems:
 
 ### Domain engine
 
-- [`src/engine/coordinator.rs`](src/engine/coordinator.rs): semantic authority for alarm state, speculative state, confirmed state, and publish reconciliation
+- [`src/engine/coordinator.rs`](src/engine/coordinator.rs): semantic authority for alarm state, speculative state, confirmed state, and job-outcome reconciliation
+- [`src/engine/workflow.rs`](src/engine/workflow.rs): workflow handler, `Job`/`JobOutcome` types, per-key effect sequencing through a fixed `WORKFLOW_ORDER`
 - [`src/engine/ingress.rs`](src/engine/ingress.rs): ingress handles and overload behavior for automated vs. user traffic
 - [`src/engine/policy.rs`](src/engine/policy.rs): transition rules for automated updates and user actions
-- [`src/engine/messages.rs`](src/engine/messages.rs): internal message types exchanged between runtime stages
+- [`src/engine/messages.rs`](src/engine/messages.rs): `DomainInput` and supporting types exchanged between adapters and the coordinator
 - [`src/engine.rs`](src/engine.rs): engine module structure
 
 ### Effects
 
-- [`src/effects/publish.rs`](src/effects/publish.rs): Kafka publish worker, retry/supersession handling, batching of automated outcomes
+- [`src/effects/publish.rs`](src/effects/publish.rs): Kafka publish worker, retry and batching of automated outcomes; receives `Publish` values and returns `PublishOutcome` values carrying `Key` results
+- [`src/effects/snooze.rs`](src/effects/snooze.rs): snooze scheduler, `DelayQueue`-backed per-key timer management; accepts `SnoozeInput` commands and emits `SnoozeOutcome` values
 - [`src/effects.rs`](src/effects.rs): effect module exports
 
 ### Domain model
 
 - [`src/model/key.rs`](src/model/key.rs): normalized alarm identity and `DEVICE#Source` parsing/formatting
 - [`src/model/user_action.rs`](src/model/user_action.rs): user actions and their target states
-- [`src/model/publish.rs`](src/model/publish.rs): publish request, attempt, and outcome types
-- [`src/model/errors.rs`](src/model/errors.rs): domain/update errors surfaced back to callers
+- [`src/model/publish.rs`](src/model/publish.rs): `Publish` request, `PublishAttempt`, and `PublishOutcome` types; `PublishResult` is `SymmetricalResult<Key>`
+- [`src/model/snooze.rs`](src/model/snooze.rs): `SnoozeInput` (the channel command), `Snooze` (the internal decision type derived from it), and `SnoozeOutcome` types for the snooze scheduler protocol
+- [`src/model/errors.rs`](src/model/errors.rs): `UpdateError` (including `UpdateError::Internal`), `SymmetricalResult<T>`, and `StateTransition`
 - [`src/model.rs`](src/model.rs): model module exports
 
 ### Metrics and test support
 
-- [`src/metrics.rs`](src/metrics.rs): low-cardinality in-process metrics for overload, queue pressure proxies, retries, and latency
+- [`src/metrics.rs`](src/metrics.rs): low-cardinality in-process metrics for overload, queue pressure proxies, retries, latency, workflow throughput, and snooze timer activity
 - [`src/test_utils.rs`](src/test_utils.rs): shared test runtime helpers and test alarm builders
 
 ### Build and packaging
@@ -129,7 +159,7 @@ That adapter:
 
 - parses requested device identifiers as `DEVICE#Source`
 - converts gRPC requests into internal user actions
-- submits them to the priority ingress queue
+- submits them to the user ingress queue
 - waits for per-key confirmation from the coordinator
 - maps domain and runtime failures back into gRPC status codes
 
@@ -144,7 +174,7 @@ It is responsible for:
 - deciding whether an automated update is meaningful enough to publish
 - validating whether a user action is allowed from the latest known state
 - assigning monotonically increasing publish ids
-- tracking speculative state until publish outcomes return
+- tracking speculative state until job outcomes return
 - committing confirmed state only when publish results are accepted
 - seeding confirmed state from startup hydration before live traffic begins
 - serving snapshots from confirmed state
@@ -156,20 +186,25 @@ The most important internal distinction is:
 
 This is what allows the service to tolerate stale publish completions without letting them overwrite newer intent.
 
-### Publish execution
+### Job pipeline
 
-The publish worker in [`src/effects/publish.rs`](src/effects/publish.rs) owns transport-facing behavior.
+When the coordinator decides a state change should be published, it assigns a `Job` (id, key, status, user-initiated flag) and sends it to the workflow handler.
 
-It:
+The workflow handler runs each job through the steps defined in `WORKFLOW_ORDER` in [`src/engine/workflow.rs`](src/engine/workflow.rs), dispatching one effect at a time and waiting for the outcome before advancing. When all steps complete, it sends a `JobOutcome` back to the coordinator.
 
-- accepts publish effects from the coordinator
-- keeps at most one tracked publish attempt per alarm key
-- lets newer attempts supersede older tracked attempts for the same key
-- retries only the attempt that is still current for that key
-- publishes Kafka records keyed by [`Key`](src/model/key.rs)
-- returns publish outcomes to the coordinator
+The coordinator reconciles each `JobOutcome`:
 
-User-initiated outcomes are returned immediately. Automated outcomes are batched before being sent back to the coordinator.
+- `JobOutcome::Committed` — advances confirmed state and resolves any pending user confirmation.
+- `JobOutcome::Failed` — resolves any pending user confirmation with an error; for user-initiated jobs, rolls back speculative state.
+- `JobOutcome::Wake` — synthesizes an automated `Unbypassed` update for the key, re-entering the pipeline.
+
+### Snooze scheduling
+
+The snooze scheduler in [`src/effects/snooze.rs`](src/effects/snooze.rs) maintains a `DelayQueue` of per-key timers.
+
+- `SnoozeInput { key, wake: Some(timestamp) }` registers (or replaces) a timer for `key` that fires at the given timestamp. If the timestamp is in the past or out of range, the scheduler responds with `SnoozeOutcome::InvalidWake` instead of `SnoozeOutcome::Accepted`.
+- `SnoozeInput { key, wake: None }` removes any existing timer for `key`. Cancelling a non-existent timer is a no-op and still responds with `SnoozeOutcome::Accepted`.
+- When a timer fires, the scheduler emits `SnoozeOutcome::Expired { key }`.
 
 ## Runtime behavior that matters
 
@@ -188,18 +223,22 @@ Automated updates use [`AutomatedIngressHandle::send_automated_update()`](src/en
 User commands use [`UserIngressHandle::try_send()`](src/engine/ingress.rs):
 
 - queue policy is bounded-and-reject
-- gRPC handlers fail fast when the priority queue is full
-- operator requests and publish outcomes are not forced to wait behind automated storm traffic
+- gRPC handlers fail fast when the user queue is full
+- operator requests are not forced to wait behind automated storm traffic
 
 This split is one of the most important design choices in the repository.
 
 ### Priority-first coordination
 
-[`AlarmStateCoordinator::start()`](src/engine/coordinator.rs) uses a biased `tokio::select!` so messages from the priority queue are handled before automated ingress. That means:
+[`AlarmStateCoordinator::start()`](src/engine/coordinator.rs) uses a biased `tokio::select!` so job outcomes from the workflow handler are handled before user input, and user input is handled before automated ingress. That means:
 
+- snooze expirations and publish outcomes are reconciled promptly
 - user commands are processed ahead of automated backlog
-- publish outcomes are reconciled promptly
 - confirmations for user actions are not structurally delayed by Redis traffic
+
+### Per-key effect sequencing
+
+The workflow handler serializes effects for each key. When a new `Job` arrives for a key that already has a job in-flight, the new job replaces the tracked job. The coordinator tracks speculative state so that only the latest intent is dispatched once the current job completes.
 
 ### Snapshot semantics
 
@@ -234,6 +273,7 @@ Two details are especially important:
 
 - bypass is source-specific, not device-wide
 - user actions are validated against the latest known state before a publish is emitted
+- non-Epics sources bypass the Epics-only suppression check when the incoming state is not `Unbypassed`
 
 ## External interfaces
 
@@ -295,9 +335,11 @@ The current implementation reads the following environment variables:
 | `EPICS_ALARM_REDIS_HOST` | Redis host for EPICS alarm stream ingestion | `127.0.0.1` |
 | `EPICS_ALARM_REDIS_PORT` | Redis port for EPICS alarm stream ingestion | `6379` |
 | `EPICS_ALARM_REDIS_KEY` | Redis Stream key to subscribe to | `acorn:alarms` |
-| `ALARMS_AUTOMATED_QUEUE_CAPACITY` | Capacity of the automated ingress queue | `4096` |
-| `ALARMS_PRIORITY_QUEUE_CAPACITY` | Capacity of the priority ingress queue | `128` |
-| `ALARMS_EFFECT_QUEUE_CAPACITY` | Capacity of the effect queue | `4096` |
+| `ALARMS_AUTOMATED_QUEUE_CAPACITY` | Automated ingress queue | `4096` |
+| `ALARMS_USER_QUEUE_CAPACITY` | User command ingress queue | `128` |
+| `ALARMS_JOB_QUEUE_CAPACITY` | Job queue between coordinator and workflow handler | `4096` |
+| `ALARMS_PUBLISH_QUEUE_CAPACITY` | Publish queue between workflow handler and publish engine | `4096` |
+| `ALARMS_SNOOZE_QUEUE_CAPACITY` | Snooze queue between workflow handler and snooze scheduler | `128` |
 | `ALARMS_METRICS_LOG_INTERVAL_SECS` | Interval for periodic metrics snapshot logging | `30` |
 
 For configuration changes, start with [`src/main.rs`](src/main.rs) and [`src/adapters/redis.rs`](src/adapters/redis.rs).
@@ -354,7 +396,7 @@ Whether launched via [`cargo run`](README.md) or as a compiled binary, the servi
 cargo test
 ```
 
-There is substantial module-level test coverage under `src/**/tests.rs`, including coordinator, policy, ingress, publish, key parsing, metrics, and adapter behavior.
+There is substantial module-level test coverage under `src/**/tests.rs`, including coordinator, policy, ingress, publish, snooze scheduler, workflow handler, key parsing, metrics, and adapter behavior.
 
 ### Container image
 
@@ -379,6 +421,16 @@ Start with:
 
 These files define transition rules, user-action validity, and how requested state becomes published state.
 
+### If you need to change bypass or snooze behavior
+
+Start with:
+
+- [`src/effects/snooze.rs`](src/effects/snooze.rs)
+- [`src/engine/workflow.rs`](src/engine/workflow.rs)
+- [`src/model/snooze.rs`](src/model/snooze.rs)
+
+These files define the snooze command protocol, the `DelayQueue`-backed timer management, and how the workflow handler processes snooze commands as part of the effect pipeline.
+
 ### If you need to change overload or storm behavior
 
 Start with:
@@ -397,7 +449,7 @@ Start with:
 - [`src/engine/coordinator.rs`](src/engine/coordinator.rs)
 - [`src/model/publish.rs`](src/model/publish.rs)
 
-These files jointly define retry behavior, supersession, batching, and how publish ids are interpreted.
+These files jointly define retry behavior, batching, and how publish ids are interpreted. The publish engine dispatches every incoming `Publish` immediately; per-key sequencing is handled at the workflow and coordinator layers.
 
 ### If you need to change external APIs
 
@@ -427,6 +479,8 @@ A few runtime details deserve explicit attention:
 - the gRPC server is spawned as a background task
 - the Redis reader is spawned as a background task and restarted in a loop
 - the coordinator and publish engine are background tasks started by the runtime
+- the workflow handler is a background task started by the runtime; if it stops, the coordinator will shut down and fail all pending confirmations
+- the snooze scheduler is a background task started by the runtime; if it stops, bypass wake-up events will not fire
 - a periodic metrics logger is spawned from [`main()`](src/main.rs)
 - if the coordinator stops unexpectedly, adapters begin surfacing queue-closed or internal errors
 - tracing is configured at debug level in [`main()`](src/main.rs)
@@ -440,6 +494,7 @@ This service depends on shared Fermilab Rust libraries for environment-variable 
 - `rust-pubsub-lib` provides Kafka publishing and Redis Stream subscription
 - `tonic` provides the gRPC server runtime
 - `tokio` provides the async runtime and channel primitives
+- `tokio-util` provides the `DelayQueue` used by the snooze scheduler
 - `ringmap` is used for latest-by-key retention during automated-ingress overload
 - `futures` is used by the publish engine to manage in-flight publish work
 

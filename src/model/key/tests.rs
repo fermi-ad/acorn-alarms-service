@@ -1,10 +1,8 @@
+//! Tests for `Key` construction, normalization, display, and equality.
+
 use crate::{proto::common::alarm::status::State, test_utils::make_status};
 
 use super::*;
-
-// ---------------------------------------------------------------------------
-// Key — From<&Status>
-// ---------------------------------------------------------------------------
 
 #[test]
 fn key_from_status_normalizes_device_name() {
@@ -20,10 +18,6 @@ fn key_from_status_preserves_source() {
     let key = Key::from(&status);
     assert_eq!(key.source, Source::Digital);
 }
-
-// ---------------------------------------------------------------------------
-// Key — From<&str>
-// ---------------------------------------------------------------------------
 
 #[test]
 fn key_from_str_parses_analog() {
@@ -97,10 +91,6 @@ fn key_from_str_source_matching_is_case_insensitive() {
     assert_eq!(Key::try_from("M:BEAM#EPICS").unwrap().source, Source::Epics);
 }
 
-// ---------------------------------------------------------------------------
-// Key — Display
-// ---------------------------------------------------------------------------
-
 #[test]
 fn key_display_formats_as_device_hash_source() {
     let key = Key::try_from("M:BEAM#Analog").unwrap();
@@ -112,10 +102,6 @@ fn key_display_formats_digital_source() {
     let key = Key::try_from("Z:ACLTST#Digital").unwrap();
     assert_eq!(key.to_string(), "Z:ACLTST#Digital");
 }
-
-// ---------------------------------------------------------------------------
-// Key — equality / hash
-// ---------------------------------------------------------------------------
 
 #[test]
 fn keys_with_same_device_and_source_are_equal() {

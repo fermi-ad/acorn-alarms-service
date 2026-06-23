@@ -2,10 +2,6 @@
 
 use super::*;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 fn make_map(fields: &[(&str, &str)]) -> HashMap<String, String> {
     fields
         .iter()
@@ -24,10 +20,6 @@ fn state_of(status: &Status) -> State {
 fn source_of(status: &Status) -> Source {
     status.source()
 }
-
-// ---------------------------------------------------------------------------
-// Device field
-// ---------------------------------------------------------------------------
 
 #[test]
 fn device_is_uppercased() {
@@ -57,10 +49,6 @@ fn missing_device_field_yields_empty_string() {
     let status = build_status_from_redis(map);
     assert!(status.device.is_empty());
 }
-
-// ---------------------------------------------------------------------------
-// Severity mappings
-// ---------------------------------------------------------------------------
 
 #[test]
 fn severity_low_maps_to_low() {
@@ -108,10 +96,6 @@ fn missing_severity_field_maps_to_unknown() {
     assert_eq!(severity_of(&status), Severity::Unknown);
 }
 
-// ---------------------------------------------------------------------------
-// Severity input is case-insensitive
-// ---------------------------------------------------------------------------
-
 #[test]
 fn severity_lowercase_low_is_accepted() {
     let map = make_map(&[("device", "D"), ("severity", "low"), ("source", "ANALOG")]);
@@ -125,10 +109,6 @@ fn severity_lowercase_high_is_accepted() {
     let status = build_status_from_redis(map);
     assert_eq!(severity_of(&status), Severity::High);
 }
-
-// ---------------------------------------------------------------------------
-// State derivation from severity
-// ---------------------------------------------------------------------------
 
 #[test]
 fn low_severity_yields_alarmed_state() {
@@ -173,10 +153,6 @@ fn missing_severity_yields_unknown_state() {
     assert_eq!(state_of(&status), State::Unknown);
 }
 
-// ---------------------------------------------------------------------------
-// Source mappings
-// ---------------------------------------------------------------------------
-
 #[test]
 fn source_analog_maps_correctly() {
     let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "ANALOG")]);
@@ -212,10 +188,6 @@ fn missing_source_field_maps_to_unknown() {
     assert_eq!(source_of(&status), Source::Unknown);
 }
 
-// ---------------------------------------------------------------------------
-// Source input is case-insensitive
-// ---------------------------------------------------------------------------
-
 #[test]
 fn source_lowercase_analog_is_accepted() {
     let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "analog")]);
@@ -229,10 +201,6 @@ fn source_lowercase_digital_is_accepted() {
     let status = build_status_from_redis(map);
     assert_eq!(source_of(&status), Source::Digital);
 }
-
-// ---------------------------------------------------------------------------
-// Parse timestamp
-// ---------------------------------------------------------------------------
 
 #[test]
 fn timestamp_is_extracted_when_present() {
@@ -279,10 +247,6 @@ fn timestamp_defaults_to_current_second_when_malformed() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Fixed / default fields
-// ---------------------------------------------------------------------------
-
 #[test]
 fn acknowledgeable_is_always_false() {
     let map = make_map(&[("device", "D"), ("severity", "HIGH"), ("source", "ANALOG")]);
@@ -310,10 +274,6 @@ fn wake_defaults_to_none() {
     let status = build_status_from_redis(map);
     assert!(status.wake.is_none());
 }
-
-// ---------------------------------------------------------------------------
-// Completely empty map
-// ---------------------------------------------------------------------------
 
 #[test]
 fn empty_map_produces_empty_device_and_unknown_fields() {
