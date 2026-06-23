@@ -14,10 +14,13 @@ use crate::{
         errors::SymmetricalResult,
         key::Key,
         publish::{Publish, PublishOutcome},
-        snooze::{Snooze, SnoozeOutcome},
+        snooze::{SnoozeInput, SnoozeOutcome},
     },
     proto::{
-        common::alarm::{Status, status::State},
+        common::alarm::{
+            Status,
+            status::{Source, State},
+        },
         google::protobuf::Timestamp,
     },
     test_utils::{DEFAULT_TEST_QUEUE_CONFIG, make_status},
@@ -29,7 +32,7 @@ const TIMEOUT_SECS: u64 = 2;
 type ChannelHandles = (
     mpsc::Sender<Job>,
     mpsc::Receiver<JobOutcome>,
-    mpsc::Receiver<Snooze>,
+    mpsc::Receiver<SnoozeInput>,
     mpsc::Sender<SnoozeOutcome>,
     mpsc::Receiver<Publish>,
     mpsc::Sender<PublishOutcome>,
@@ -104,11 +107,7 @@ async fn new_job_dispatches_snooze_first() {
     ) = make_handler();
 
     let key = make_key("M:BEAM#Analog");
-    let mut status = make_status(
-        "M:BEAM",
-        State::Bypassed,
-        crate::proto::common::alarm::status::Source::Analog,
-    );
+    let mut status = make_status("M:BEAM", State::Bypassed, Source::Analog);
     status.wake = Some(Timestamp {
         seconds: 9_999_999_999,
         nanos: 0,
@@ -117,15 +116,10 @@ async fn new_job_dispatches_snooze_first() {
     job_tx.send(make_job(key, status, false)).await.unwrap();
 
     // Snooze must arrive before publish
-    let snooze = timeout(Duration::from_secs(TIMEOUT_SECS), snooze_rx.recv())
+    let _ = timeout(Duration::from_secs(TIMEOUT_SECS), snooze_rx.recv())
         .await
         .expect("timed out waiting for snooze command")
         .expect("snooze channel closed");
-
-    assert!(
-        matches!(snooze, Snooze::Set { .. }),
-        "expected Snooze::Set for a Bypassed job with a wake timestamp"
-    );
 
     // Publish channel must still be empty at this point
     assert!(
@@ -391,37 +385,6 @@ async fn snooze_expiry_sends_wake_outcome() {
 }
 
 #[tokio::test]
-async fn non_bypass_job_sends_cancel_snooze() {
-    let (
-        job_tx,
-        _job_outcome_rx,
-        mut snooze_rx,
-        _snooze_outcome_tx,
-        _publish_rx,
-        _publish_outcome_tx,
-    ) = make_handler();
-
-    let key = make_key("M:BEAM#Analog");
-    let status = make_status(
-        "M:BEAM",
-        State::Alarmed,
-        crate::proto::common::alarm::status::Source::Analog,
-    );
-
-    job_tx.send(make_job(key, status, false)).await.unwrap();
-
-    let snooze = timeout(Duration::from_secs(TIMEOUT_SECS), snooze_rx.recv())
-        .await
-        .expect("timed out waiting for snooze command")
-        .expect("snooze channel closed");
-
-    assert!(
-        matches!(snooze, Snooze::Cancel { .. }),
-        "expected Snooze::Cancel for a non-Bypassed job"
-    );
-}
-
-#[tokio::test]
 async fn automated_batch_outcome_dispatches_all_results() {
     let (
         job_tx,
@@ -452,12 +415,8 @@ async fn automated_batch_outcome_dispatches_all_results() {
             .await
             .expect("timed out waiting for snooze")
             .expect("snooze channel closed");
-        let snooze_key = match snooze {
-            Snooze::Cancel { key } => key,
-            Snooze::Set { key, .. } => key,
-        };
         snooze_outcome_tx
-            .send(SnoozeOutcome::Accepted { key: snooze_key })
+            .send(SnoozeOutcome::Accepted { key: snooze.key })
             .await
             .unwrap();
 

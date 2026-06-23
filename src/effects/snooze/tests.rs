@@ -1,32 +1,21 @@
 //! Tests for the snooze scheduler.
 
-use std::time::Duration;
-
-use tokio::{sync::mpsc, time::timeout};
+use tokio::time::timeout;
 
 use super::*;
-use crate::{
-    metrics::Metrics,
-    model::{
-        key::Key,
-        snooze::{Snooze, SnoozeOutcome},
-    },
-    proto::google::protobuf::Timestamp,
-    test_utils::DEFAULT_TEST_QUEUE_CONFIG,
-};
+use crate::test_utils::DEFAULT_TEST_QUEUE_CONFIG;
 
 const CHAN_CAP: usize = 8;
 const TIMEOUT_SECS: u64 = 2;
 
-fn make_key(s: &str) -> Key {
-    Key::try_from(s).unwrap()
+fn make_key(s: &str) -> AlarmKey {
+    AlarmKey::try_from(s).unwrap()
 }
 
 /// Returns a timestamp ~60 seconds in the future — well within tokio's DelayQueue range.
 fn future_wake() -> Timestamp {
-    let soon = chrono::Utc::now() + chrono::Duration::seconds(60);
     Timestamp {
-        seconds: soon.timestamp(),
+        seconds: Utc::now().timestamp() + 60,
         nanos: 0,
     }
 }
@@ -41,7 +30,7 @@ fn invalid_wake() -> Timestamp {
 }
 
 fn make_port() -> (
-    mpsc::Sender<Snooze>,
+    mpsc::Sender<SnoozeInput>,
     mpsc::Receiver<SnoozeOutcome>,
     SnoozeEffectPort,
 ) {
@@ -65,9 +54,9 @@ async fn set_snooze_returns_accepted() {
 
     let key = make_key("M:BEAM#Analog");
     snooze_tx
-        .send(Snooze::Set {
+        .send(SnoozeInput {
             key: key.clone(),
-            wake: future_wake(),
+            wake: Some(future_wake()),
         })
         .await
         .unwrap();
@@ -90,7 +79,10 @@ async fn cancel_snooze_returns_accepted() {
 
     let key = make_key("M:BEAM#Analog");
     snooze_tx
-        .send(Snooze::Cancel { key: key.clone() })
+        .send(SnoozeInput {
+            key: key.clone(),
+            wake: None,
+        })
         .await
         .unwrap();
 
@@ -112,9 +104,9 @@ async fn set_snooze_with_past_timestamp_returns_invalid_wake() {
 
     let key = make_key("M:BEAM#Analog");
     snooze_tx
-        .send(Snooze::Set {
+        .send(SnoozeInput {
             key: key.clone(),
-            wake: invalid_wake(),
+            wake: Some(invalid_wake()),
         })
         .await
         .unwrap();
@@ -137,19 +129,16 @@ async fn set_snooze_replaces_existing_timer() {
 
     let key = make_key("M:BEAM#Analog");
 
-    let first_wake = {
-        let t = chrono::Utc::now() + chrono::Duration::seconds(120);
-        Timestamp {
-            seconds: t.timestamp(),
-            nanos: 0,
-        }
+    let first_wake = Timestamp {
+        seconds: Utc::now().timestamp() + 120,
+        nanos: 0,
     };
 
     // First set
     snooze_tx
-        .send(Snooze::Set {
+        .send(SnoozeInput {
             key: key.clone(),
-            wake: first_wake,
+            wake: Some(first_wake),
         })
         .await
         .unwrap();
@@ -162,9 +151,9 @@ async fn set_snooze_replaces_existing_timer() {
 
     // Second set for same key — replaces the first timer
     snooze_tx
-        .send(Snooze::Set {
+        .send(SnoozeInput {
             key: key.clone(),
-            wake: future_wake(),
+            wake: Some(future_wake()),
         })
         .await
         .unwrap();
@@ -190,7 +179,10 @@ async fn cancel_nonexistent_snooze_returns_accepted() {
 
     let key = make_key("NEVER:SET#Analog");
     snooze_tx
-        .send(Snooze::Cancel { key: key.clone() })
+        .send(SnoozeInput {
+            key: key.clone(),
+            wake: None,
+        })
         .await
         .unwrap();
 
@@ -222,9 +214,9 @@ async fn expired_snooze_sends_expired_outcome() {
     };
 
     snooze_tx
-        .send(Snooze::Set {
+        .send(SnoozeInput {
             key: key.clone(),
-            wake: soon,
+            wake: Some(soon),
         })
         .await
         .unwrap();

@@ -15,9 +15,9 @@ use crate::{
     model::{
         key::Key,
         publish::{Publish, PublishDetails, PublishOutcome, PublishResult},
-        snooze::{Snooze, SnoozeOutcome},
+        snooze::{SnoozeInput, SnoozeOutcome},
     },
-    proto::common::alarm::{Status, status::State},
+    proto::common::alarm::Status,
 };
 
 #[cfg(test)]
@@ -86,14 +86,14 @@ impl PublishWorkflowPort {
 /// Channel pair connecting the workflow handler and the snooze scheduler.
 pub struct SnoozeWorkflowPort {
     pub snooze_outcome_rx: mpsc::Receiver<SnoozeOutcome>,
-    pub snooze_tx: mpsc::Sender<Snooze>,
+    pub snooze_tx: mpsc::Sender<SnoozeInput>,
 }
 impl SnoozeWorkflowPort {
     async fn recv(&mut self) -> Option<SnoozeOutcome> {
         self.snooze_outcome_rx.recv().await
     }
 
-    async fn send(&self, outgoing: Snooze) -> Result<(), SendError<Snooze>> {
+    async fn send(&self, outgoing: SnoozeInput) -> Result<(), SendError<SnoozeInput>> {
         self.snooze_tx.send(outgoing).await
     }
 }
@@ -234,14 +234,11 @@ impl WorkflowHandler {
 
     async fn snooze(&self, key: Key) -> Result<(), ()> {
         let job = self.lookup_job(&key);
-        let snooze = match job.status.state() {
-            State::Bypassed if job.status.wake.is_some() => Snooze::Set {
-                key,
-                wake: job.status.wake.unwrap(),
-            },
-            _ => Snooze::Cancel { key },
+        let snooze_input = SnoozeInput {
+            key,
+            wake: job.status.wake,
         };
-        self.snooze_port.send(snooze).await.map_err(|_| ())
+        self.snooze_port.send(snooze_input).await.map_err(|_| ())
     }
 
     async fn publish(&self, key: Key) -> Result<(), ()> {

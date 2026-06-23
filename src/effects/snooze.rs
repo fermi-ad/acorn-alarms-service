@@ -25,7 +25,7 @@ use crate::{
     metrics::Metrics,
     model::{
         key::Key as AlarmKey,
-        snooze::{Snooze, SnoozeOutcome},
+        snooze::{Snooze, SnoozeInput, SnoozeOutcome},
     },
     proto::google::protobuf::Timestamp,
 };
@@ -35,11 +35,11 @@ mod tests;
 
 /// Channel pair used by the workflow handler to communicate with the snooze scheduler.
 pub struct SnoozeEffectPort {
-    pub snooze_rx: mpsc::Receiver<Snooze>,
+    pub snooze_rx: mpsc::Receiver<SnoozeInput>,
     pub snooze_outcome_tx: mpsc::Sender<SnoozeOutcome>,
 }
 impl SnoozeEffectPort {
-    async fn recv(&mut self) -> Option<Snooze> {
+    async fn recv(&mut self) -> Option<SnoozeInput> {
         self.snooze_rx.recv().await
     }
 
@@ -62,8 +62,8 @@ pub async fn run_snooze_scheduler(mut port: SnoozeEffectPort, metrics: Metrics) 
 
     loop {
         tokio::select! {
-            Some(snooze) = port.recv() => {
-                if handle_snooze_input(snooze, &mut delay_queue, &mut registry, &port, &metrics).await.is_err() {
+            Some(snooze_input) = port.recv() => {
+                if handle_snooze_input(snooze_input, &mut delay_queue, &mut registry, &port, &metrics).await.is_err() {
                     // Coordinator has shut down
                     break;
                 }
@@ -85,12 +85,13 @@ pub async fn run_snooze_scheduler(mut port: SnoozeEffectPort, metrics: Metrics) 
 }
 
 async fn handle_snooze_input(
-    snooze: Snooze,
+    snooze_input: SnoozeInput,
     delay_queue: &mut DelayQueue<AlarmKey>,
     registry: &mut HashMap<AlarmKey, DelayTaskKey>,
     port: &SnoozeEffectPort,
     metrics: &Metrics,
 ) -> Result<(), SendError<SnoozeOutcome>> {
+    let snooze = Snooze::from(snooze_input);
     let outcome = match snooze {
         Snooze::Set { key, wake } => match timestamp_secs_to_instant(wake) {
             Some(instant) => {
