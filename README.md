@@ -64,19 +64,37 @@ Those queues connect the main subsystems:
 
 ### Runtime architecture diagram
 
-```
+```mermaid
 flowchart TD
-    Redis[Redis Stream] -->|Status| AutoIngress[AutomatedIngressHandle]
-    gRPC[gRPC Adapter] -->|DomainInput| UserIngress[UserIngressHandle]
-    AutoIngress -->|DomainInput - automated| Coordinator[AlarmStateCoordinator]
+    subgraph Adapters
+        RedisAdapt[Redis Adapter]
+        gRPCAdapt[gRPC Adapter]
+    end
+    subgraph Ingress[Ingress Handles]
+        AutoIngress[AutomatedIngressHandle]
+        UserIngress[UserIngressHandle]
+    end
+    subgraph Core[Business Logic / State]
+        Coordinator[AlarmStateCoordinator]
+    end
+    subgraph Workflow
+        WorkflowHandler[WorkflowHandler]
+        subgraph Effects
+            SnoozeScheduler[SnoozeScheduler]
+            PublishEngine[PublishEngine]
+        end
+    end
+    RedisAdapt -->|Status| AutoIngress
+    gRPCAdapt -->|DomainInput| UserIngress
+    AutoIngress -->|DomainInput - automated| Coordinator
     UserIngress -->|DomainInput - user| Coordinator
-    Coordinator -->|Job| WorkflowHandler[WorkflowHandler]
-    WorkflowHandler -->|Snooze| SnoozeScheduler[SnoozeScheduler]
+    Coordinator -->|Job| WorkflowHandler
+    WorkflowHandler -->|SnoozeInput| SnoozeScheduler
     SnoozeScheduler -->|SnoozeOutcome| WorkflowHandler
-    WorkflowHandler -->|Publish| PublishEngine[PublishEngine]
+    WorkflowHandler -->|Publish| PublishEngine
     PublishEngine -->|PublishOutcome| WorkflowHandler
     WorkflowHandler -->|JobOutcome| Coordinator
-    Coordinator -->|Snapshot / Confirmation| gRPC
+    Coordinator -->|Snapshot / Confirmation| gRPCAdapt
 ```
 
 ## Repository map
