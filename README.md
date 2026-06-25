@@ -35,14 +35,15 @@ The main architectural boundary is between domain logic and transport logic:
 
 ## Runtime architecture
 
-At startup, [`src/main.rs`](src/main.rs) does six things:
+At startup, [`src/main.rs`](src/main.rs) does the following:
 
 1. configures tracing
-2. reads Kafka host/topic configuration and loads startup hydration from the Kafka snapshot
-3. creates the Kafka publisher
-4. reads queue-capacity and metrics-log configuration from environment variables
-5. starts the runtime in [`src/runtime.rs`](src/runtime.rs) with hydrated confirmed state
-6. spawns the gRPC server, Redis reader restart loop, and periodic metrics logging task
+2. reads Kafka host/topic and AEOLUS proxy host configuration
+3. loads startup hydration from the Kafka and AEOLUS proxy snapshots
+4. creates the Kafka publisher
+5. reads queue-capacity and metrics-log configuration from environment variables
+6. starts the runtime in [`src/runtime.rs`](src/runtime.rs) with hydrated confirmed state
+7. spawns the gRPC server, Redis reader restart loop, and periodic metrics logging task
 
 The runtime wiring in [`src/runtime.rs`](src/runtime.rs) creates bounded channel pairs for each subsystem connection:
 
@@ -109,6 +110,7 @@ flowchart TD
 
 - [`src/adapters/grpc.rs`](src/adapters/grpc.rs): gRPC service implementation for user-driven commands and snapshots
 - [`src/adapters/redis.rs`](src/adapters/redis.rs): Redis Stream subscriber for automated alarm updates
+- [`src/adapters/acnet_hydration.rs`](src/adapters/acnet_hydration.rs): ACNET startup hydration loader
 - [`src/adapters/epics_hydration.rs`](src/adapters/epics_hydration.rs): EPICS startup hydration loader and snapshot reduction rules
 - [`src/adapters.rs`](src/adapters.rs): adapter module exports
 

@@ -9,9 +9,12 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
 use rust_pubsub_lib::{PubSubError, Snapshot};
+use tonic::{Status as TonicStatus, transport::Error as TonicError};
 
 use crate::{
-    adapters::epics_hydration::load_epics_hydration, model::key::Key, proto::common::alarm::Status,
+    adapters::{acnet_hydration::load_acnet_hydration, epics_hydration::load_epics_hydration},
+    model::key::Key,
+    proto::common::alarm::Status,
 };
 
 #[cfg(test)]
@@ -22,18 +25,26 @@ pub type HydratedStatuses = HashMap<Key, Status>;
 
 #[derive(Debug)]
 pub enum HydrationError {
-    SnapshotReadFailed(PubSubError),
+    AcnetSnapshotReadFailed(TonicStatus),
+    AeolusProxyConnectionFailed(TonicError),
+    EpicsSnapshotReadFailed(PubSubError),
     KeyInMultipleSources(Key),
 }
 impl Display for HydrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            HydrationError::AcnetSnapshotReadFailed(status) => {
+                write!(f, "Failed reading ACNET snapshot. Cause: {status}")
+            }
+            HydrationError::AeolusProxyConnectionFailed(source) => {
+                write!(f, "Failed contacting AEOLUS proxy. Cause: {source}")
+            }
             HydrationError::KeyInMultipleSources(key) => write!(
                 f,
                 "Encountered identical key from more than one hydration source: {key}"
             ),
-            HydrationError::SnapshotReadFailed(source) => {
-                write!(f, "Failed reading snapshot. Cause: {source}")
+            HydrationError::EpicsSnapshotReadFailed(source) => {
+                write!(f, "Failed reading EPICS snapshot. Cause: {source}")
             }
         }
     }
@@ -42,18 +53,18 @@ impl Error for HydrationError {}
 
 /// Loads the startup hydration state required to seed the coordinator.
 ///
-/// Startup hydration runs before live adapters begin sending traffic. The
-/// current implementation restores EPICS bypass state from the configured
-/// snapshot backend, then merges additional loader outputs through the same
-/// contract when they become available.
+/// Startup hydration runs before live adapters begin sending traffic.
+/// ACNET initial state is recovered from the AEOLUS gRPC proxy.
+/// EPICS bypass state is restored from the configured snapshot backend.
+/// The final hydrated state is the merger of these two sources.
 pub async fn load_startup_hydration<S: Snapshot>(
+    acnet_host: String,
     epics_host: String,
     epics_topic: String,
 ) -> Result<HydratedStatuses, HydrationError> {
-    let mut epics_statuses = load_epics_hydration::<S>(epics_host, epics_topic).await?;
-    let placeholder_acnet_statuses = HashMap::new();
-    merge_hydrated_statuses(&mut epics_statuses, placeholder_acnet_statuses)?;
-    Ok(epics_statuses)
+    let acnet_statuses = load_acnet_hydration(acnet_host).await?;
+    let epics_statuses = load_epics_hydration::<S>(epics_host, epics_topic).await?;
+    merge_hydrated_statuses(epics_statuses, acnet_statuses)
 }
 
 /// Merges one loader result into the accumulated startup hydration map.
@@ -62,9 +73,9 @@ pub async fn load_startup_hydration<S: Snapshot>(
 /// attempt to seed the same [`Key`], startup fails loudly so source ownership
 /// remains explicit and no precedence rule is applied implicitly.
 fn merge_hydrated_statuses(
-    accumulated: &mut HydratedStatuses,
+    mut accumulated: HydratedStatuses,
     incoming: HydratedStatuses,
-) -> Result<(), HydrationError> {
+) -> Result<HydratedStatuses, HydrationError> {
     for (key, status) in incoming {
         if accumulated.contains_key(&key) {
             return Err(HydrationError::KeyInMultipleSources(key));
@@ -72,5 +83,5 @@ fn merge_hydrated_statuses(
         accumulated.insert(key, status);
     }
 
-    Ok(())
+    Ok(accumulated)
 }

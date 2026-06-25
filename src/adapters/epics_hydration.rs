@@ -28,7 +28,7 @@ pub async fn load_epics_hydration<S: Snapshot>(
 ) -> Result<HydratedStatuses, HydrationError> {
     let records = S::get::<StringMessage>(host, topic)
         .await
-        .map_err(HydrationError::SnapshotReadFailed)?;
+        .map_err(HydrationError::EpicsSnapshotReadFailed)?;
     Ok(reduce_snapshot(records))
 }
 
