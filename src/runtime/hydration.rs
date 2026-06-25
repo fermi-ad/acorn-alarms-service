@@ -1,11 +1,10 @@
 //! Startup hydration helpers for seeding confirmed coordinator state.
 //!
 //! This module owns the startup-only assembly step that gathers confirmed alarm
-//! state before the runtime begins processing live traffic. The current
-//! implementation restores EPICS bypass state from a snapshot backend and merges
-//! loader outputs through a shared contract so future sources can contribute
-//! disjoint keyspaces without changing coordinator startup semantics.
-
+//! state before the runtime begins processing live traffic.
+/// ACNET initial state is recovered from the AEOLUS gRPC proxy.
+/// EPICS bypass state is restored from the configured snapshot backend.
+/// The final hydrated state is the merger of these two sources.
 use std::{collections::HashMap, error::Error, fmt::Display};
 
 use rust_pubsub_lib::{PubSubError, Snapshot};
@@ -62,9 +61,11 @@ pub async fn load_startup_hydration<S: Snapshot>(
     epics_host: String,
     epics_topic: String,
 ) -> Result<HydratedStatuses, HydrationError> {
-    let acnet_statuses = load_acnet_hydration(acnet_host).await?;
-    let epics_statuses = load_epics_hydration::<S>(epics_host, epics_topic).await?;
-    merge_hydrated_statuses(epics_statuses, acnet_statuses)
+    let (acnet_statuses, epics_statuses) = tokio::try_join!(
+        load_acnet_hydration(acnet_host),
+        load_epics_hydration::<S>(epics_host, epics_topic)
+    )?;
+    merge_hydrated_statuses(acnet_statuses, epics_statuses)
 }
 
 /// Merges one loader result into the accumulated startup hydration map.
