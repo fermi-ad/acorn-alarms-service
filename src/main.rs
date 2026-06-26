@@ -30,6 +30,10 @@ const DEFAULT_CONTROLS_HOST: &str = "kafka-cluster-kafka-bootstrap.kafka.svc.adk
 const CONTROLS_ALARMS_TOPIC: &str = "CONTROLS_ALARMS_TOPIC";
 const DEFAULT_CONTROLS_TOPIC: &str = "alarms";
 
+const AEOLUS_PROXY_HOST: &str = "AEOLUS_PROXY_HOST";
+const DEFAULT_AEOLUS_PROXY: &str =
+    "https://alarms-bridge-acnet.controls-appdev.svc.adkube.fnal.gov:6802";
+
 const ALARMS_AUTOMATED_QUEUE_CAPACITY: &str = "ALARMS_AUTOMATED_QUEUE_CAPACITY";
 const AUTOMATED_CAP_DEFAULT: usize = 4096;
 const ALARMS_JOB_QUEUE_CAPACITY: &str = "ALARMS_JOB_QUEUE_CAPACITY";
@@ -40,6 +44,7 @@ const ALARMS_PUBLISH_QUEUE_CAPACITY: &str = "ALARMS_PUBLISH_QUEUE_CAPACITY";
 const PUBLISH_CAP_DEFAULT: usize = 4096;
 const ALARMS_SNOOZE_QUEUE_CAPACITY: &str = "ALARMS_SNOOZE_QUEUE_CAPACITY";
 const SNOOZE_CAP_DEFAULT: usize = 128;
+
 const ALARMS_METRICS_LOG_INTERVAL_SECS: &str = "ALARMS_METRICS_LOG_INTERVAL_SECS";
 const METRICS_LOG_INTERVAL_DEFAULT_SECS: u64 = 30;
 
@@ -59,8 +64,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let kafka_host = get_kafka_host();
     let kafka_topic = get_kafka_topic();
-    let hydrated_statuses =
-        load_startup_hydration::<KafkaSnapshot>(kafka_host.clone(), kafka_topic.clone()).await?;
+    let hydrated_statuses = load_startup_hydration::<KafkaSnapshot>(
+        get_aeolus_proxy_host(),
+        kafka_host.clone(),
+        kafka_topic.clone(),
+    )
+    .await?;
     let publisher = KafkaPublisher::new(kafka_host, kafka_topic);
     let queue_config = get_queue_sizes();
 
@@ -108,6 +117,10 @@ async fn log_metrics_periodically(metrics: metrics::Metrics, interval: Duration)
         ticker.tick().await;
         debug!(snapshot = ?metrics.snapshot(), "metrics snapshot");
     }
+}
+
+fn get_aeolus_proxy_host() -> String {
+    env_var::get(AEOLUS_PROXY_HOST).or_else(|| DEFAULT_AEOLUS_PROXY.to_string())
 }
 
 fn get_kafka_host() -> String {
