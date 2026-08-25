@@ -10,11 +10,10 @@
 use std::{collections::HashMap, error::Error};
 
 use chrono::Utc;
-use futures::Stream;
 use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{MapMessage, Message, RedisStreamSubscriber, Subscriber};
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
+use tokio_stream::{Stream, StreamExt};
 use tracing::{debug, error, warn};
 
 use crate::{
