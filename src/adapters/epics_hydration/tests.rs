@@ -7,7 +7,6 @@ use crate::proto::common::alarm::status::State;
 
 struct FakeSnapshot;
 
-#[tonic::async_trait]
 impl Snapshot for FakeSnapshot {
     async fn get<M: Message>(host: String, topic: String) -> Result<Vec<M>, PubSubError> {
         assert_eq!(host, "test-host");

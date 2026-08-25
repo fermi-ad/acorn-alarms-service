@@ -53,7 +53,6 @@ impl TestPub {
     }
 }
 
-#[tonic::async_trait]
 impl Publisher for TestPub {
     fn new(_host: String, _topic: String) -> Self {
         Self {

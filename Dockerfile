@@ -1,9 +1,11 @@
-FROM debian:trixie-slim
+FROM adregistry.fnal.gov/dev-containers/redhat-ubi9-minimal
 
-# Need libssl for connection to Kafka
-RUN apt-get update -y && apt-get install -y libssl3 libsasl2-2 && apt-get clean -y
+RUN useradd -u 10001 -r -M -s /sbin/nologin appuser
 
-WORKDIR /app
-COPY target/release/grpc-alarms /app/grpc-alarms
+COPY --chown=10001:10001 target/release/grpc-alarms /usr/local/bin/grpc-alarms
+
 EXPOSE 6802
-CMD [ "./grpc-alarms" ]
+
+USER 10001
+
+ENTRYPOINT [ "/usr/local/bin/grpc-alarms" ]

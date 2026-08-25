@@ -14,8 +14,8 @@ use std::{
 };
 
 use rust_pubsub_lib::{
-    KafkaPublisher, KafkaSubscriber, KafkaTestHarness, Message, PubSubError, Publisher,
-    StringMessage, Subscriber,
+    KafkaPublisher, KafkaSubscriber, KafkaTestHarness, Message, MessageStream, PubSubError,
+    Publisher, StringMessage, Subscriber,
 };
 use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::StreamExt;
@@ -65,7 +65,6 @@ impl ControlledPublisher {
     }
 }
 
-#[tonic::async_trait]
 impl Publisher for ControlledPublisher {
     fn new(_host: String, _topic: String) -> Self {
         Self::new([])
@@ -378,8 +377,8 @@ async fn kafka_publish_reaches_broker_with_correct_key() {
     let (harness, topic) = KafkaTestHarness::with_new_topic("kafka-worker-integration").await;
     let host = harness.host().await;
 
-    let mut subscriber = KafkaSubscriber::new(host.clone(), topic.clone());
-    let mut stream = subscriber.get_stream::<StringMessage>().await.unwrap();
+    let subscriber = KafkaSubscriber::new(host.clone(), topic.clone());
+    let mut stream: MessageStream<StringMessage> = subscriber.get_stream().await;
 
     let publisher = KafkaPublisher::new(host.clone(), topic.clone());
     let (publish_tx, mut outcome_rx) = make_pipeline(publisher);
@@ -402,8 +401,7 @@ async fn kafka_publish_reaches_broker_with_correct_key() {
     let msg = timeout(Duration::from_secs(5), stream.next())
         .await
         .expect("timed out waiting for Kafka message")
-        .expect("stream ended unexpectedly")
-        .expect("Kafka subscriber returned an error");
+        .expect("stream ended unexpectedly");
 
     assert_eq!(msg.key_ref(), Some("M:BEAM#Analog"));
     let decoded: Status =

@@ -5,17 +5,13 @@ on:
     branches:
       - main
   pull_request:
-    branches:
-      - main
 
 jobs:
   run-tests-and-coverage:
-    uses: fermi-ad/.github/.github/workflows/rust-integration.yaml@v1
+    uses: fermi-ad/.github/.github/workflows/rust-integration.yaml@swb_v2
     secrets: inherit
     permissions:
       contents: write
       pull-requests: write
     with:
-      pull-git-submodules: true
       references-internal-git-repo: true
-      static-dependencies: 'libcurl4-openssl-dev libsasl2-dev'

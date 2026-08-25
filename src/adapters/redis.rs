@@ -10,10 +10,11 @@
 use std::{collections::HashMap, error::Error};
 
 use chrono::Utc;
+use futures::Stream;
 use rust_env_var_lib::env_var;
-use rust_pubsub_lib::{MapMessage, Message, PubSubError, RedisStreamSubscriber, Subscriber};
+use rust_pubsub_lib::{MapMessage, Message, RedisStreamSubscriber, Subscriber};
 use tokio::sync::mpsc;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -79,8 +80,8 @@ pub async fn start_redis_reader(
         "Connecting to Redis stream reader via pubsub-lib"
     );
 
-    let mut subscriber = RedisStreamSubscriber::new(url, stream_key);
-    let stream = subscriber.get_stream::<MapMessage>().await?;
+    let subscriber = RedisStreamSubscriber::new(url, stream_key);
+    let stream = subscriber.get_stream().await;
 
     debug!(
         target = "redis_stream",
@@ -90,46 +91,31 @@ pub async fn start_redis_reader(
     run_alarm_stream(automated_channel, stream).await
 }
 
-async fn run_alarm_stream<S>(
+async fn run_alarm_stream<S: Stream<Item = MapMessage> + Unpin>(
     automated_channel: AutomatedIngressHandle,
     mut stream: S,
-) -> Result<(), Box<dyn Error + Send + Sync>>
-where
-    S: Stream<Item = Result<MapMessage, PubSubError>> + Unpin,
-{
-    while let Some(item) = stream.next().await {
-        match item {
-            Err(e) => {
-                debug!(
-                    target = "redis_stream",
-                    error = ?e,
-                    "Redis stream error — pubsub-lib will reconnect automatically"
-                );
-                continue;
-            }
-            Ok(msg) => {
-                let payload = msg.extract_value();
-                let status = build_status_from_redis(payload);
-                if status.device.is_empty() {
-                    warn!(
-                        target = "redis_stream",
-                        "Missing required device field in alarm entry"
-                    );
-                    continue;
-                }
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    while let Some(msg) = stream.next().await {
+        let payload = msg.extract_value();
+        let status = build_status_from_redis(payload);
+        if status.device.is_empty() {
+            warn!(
+                target = "redis_stream",
+                "Missing required device field in alarm entry"
+            );
+            continue;
+        }
 
-                debug!(
-                    target = "redis_stream",
-                    device = %status.device,
-                    severity = ?status.severity,
-                    source = ?status.source,
-                    "Parsed alarm fields"
-                );
+        debug!(
+            target = "redis_stream",
+            device = %status.device,
+            severity = ?status.severity,
+            source = ?status.source,
+            "Parsed alarm fields"
+        );
 
-                if let Err(send_error) = automated_channel.send_automated_update(status).await {
-                    log_automated_send_error(send_error);
-                }
-            }
+        if let Err(send_error) = automated_channel.send_automated_update(status).await {
+            log_automated_send_error(send_error);
         }
     }
 

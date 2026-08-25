@@ -6,11 +6,12 @@ use rust_env_var_lib::env_var;
 use rust_pubsub_lib::{KafkaSnapshot, Publisher, kafka_impl::KafkaPublisher};
 use tokio::{signal, spawn, time};
 use tonic::transport::Server;
-use tracing::{Level, debug, error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use adapters::{grpc::AlarmCommandsService, redis::start_redis_reader};
 use proto::services::alarm_commands::alarm_commands_server::AlarmCommandsServer;
 use runtime::{QueueCapacityConfig, hydration::load_startup_hydration};
+use tracing_subscriber::{EnvFilter, Registry, fmt::layer, layer::SubscriberExt};
 
 mod adapters;
 mod effects;
@@ -51,14 +52,7 @@ const METRICS_LOG_INTERVAL_DEFAULT_SECS: u64 = 30;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Logging setup
-    let subscriber = tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .with_target(false)
-        .with_file(true)
-        .with_line_number(true)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("Unable to set global subscriber");
+    setup_logging()?;
 
     info!("Acorn Alarms Service starting…");
 
@@ -107,6 +101,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     signal::ctrl_c().await?;
+    Ok(())
+}
+
+fn setup_logging() -> Result<(), Box<dyn std::error::Error>> {
+    let fmt_layer = layer()
+        .with_target(false)
+        .with_file(true)
+        .with_line_number(true);
+    // The following reads the log levels specified in the RUST_LOG environment variable. Allows us to configure logging
+    // at both the application level and for specific crates/modules.
+    let level_layer = EnvFilter::from_default_env();
+    let subscriber = Registry::default().with(fmt_layer).with(level_layer);
+    tracing::subscriber::set_global_default(subscriber)?;
     Ok(())
 }
 

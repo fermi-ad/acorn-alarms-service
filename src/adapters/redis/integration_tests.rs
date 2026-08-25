@@ -6,7 +6,7 @@
 
 use std::{collections::HashMap, time::Duration};
 
-use rust_pubsub_lib::{Publisher, RedisStreamPublisher, RedisTestHarness};
+use rust_pubsub_lib::{MessageStream, Publisher, RedisStreamPublisher, RedisTestHarness};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -30,8 +30,8 @@ async fn valid_alarm_is_forwarded_to_state_channel() {
     let host = harness.get_host();
     let topic = "acorn:alarms-valid".to_string();
 
-    let mut subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
-    let stream = subscriber.get_stream::<MapMessage>().await.unwrap();
+    let subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
+    let stream: MessageStream<MapMessage> = subscriber.get_stream().await;
 
     let (tx, mut rx) = mpsc::channel(4);
 
@@ -72,8 +72,8 @@ async fn entry_without_device_is_skipped() {
     let host = harness.get_host();
     let topic = "acorn:alarms-no-device".to_string();
 
-    let mut subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
-    let stream = subscriber.get_stream::<MapMessage>().await.unwrap();
+    let subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
+    let stream: MessageStream<MapMessage> = subscriber.get_stream().await;
 
     let (tx, mut rx) = mpsc::channel(4);
 
@@ -104,50 +104,13 @@ async fn entry_without_device_is_skipped() {
 }
 
 #[tokio::test]
-async fn stream_error_is_skipped_and_loop_continues() {
-    let err_item: Result<MapMessage, PubSubError> = Err(PubSubError::default());
-    let ok_item: Result<MapMessage, PubSubError> = Ok(alarm_msg("Z:ACLTST", "LOW", "DIGITAL"));
-
-    let stream = tokio_stream::iter(vec![err_item, ok_item]);
-    let (tx, mut rx) = mpsc::channel(4);
-
-    run_alarm_stream(
-        AutomatedIngressHandle::new(tx, Metrics::new(&DEFAULT_TEST_QUEUE_CONFIG)),
-        stream,
-    )
-    .await
-    .unwrap();
-
-    let action = rx
-        .try_recv()
-        .expect("expected one coordinator message after the stream error");
-    match action {
-        DomainInput::AutomatedUpdate(status) => {
-            assert_eq!(
-                status.device, "Z:ACLTST",
-                "device name must match the valid message"
-            );
-            assert_eq!(status.state(), State::Alarmed);
-            assert_eq!(status.severity(), Severity::Low);
-            assert_eq!(status.source(), Source::Digital);
-        }
-        _ => panic!("expected automated domain input"),
-    }
-
-    assert!(
-        rx.try_recv().is_err(),
-        "only one message should have been forwarded"
-    );
-}
-
-#[tokio::test]
 async fn multiple_alarms_are_all_forwarded() {
     let harness = RedisTestHarness::new(None).await;
     let host = harness.get_host();
     let topic = "acorn:alarms-multi".to_string();
 
-    let mut subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
-    let stream = subscriber.get_stream::<MapMessage>().await.unwrap();
+    let subscriber = RedisStreamSubscriber::new(host.clone(), topic.clone());
+    let stream: MessageStream<MapMessage> = subscriber.get_stream().await;
 
     let (tx, mut rx) = mpsc::channel(4);
 
@@ -203,7 +166,7 @@ async fn multiple_alarms_are_all_forwarded() {
 
 #[tokio::test]
 async fn no_alarm_is_translated_into_ok_state() {
-    let stream = tokio_stream::iter(vec![Ok(alarm_msg("M:BEAM", "NO_ALARM", "EPICS"))]);
+    let stream = tokio_stream::iter(vec![alarm_msg("M:BEAM", "NO_ALARM", "EPICS")]);
     let (tx, mut rx) = mpsc::channel(4);
 
     run_alarm_stream(
@@ -229,7 +192,7 @@ async fn no_alarm_is_translated_into_ok_state() {
 
 #[tokio::test]
 async fn dropped_receiver_does_not_panic() {
-    let ok_item: Result<MapMessage, PubSubError> = Ok(alarm_msg("M:BEAM", "HIGH", "ANALOG"));
+    let ok_item: MapMessage = alarm_msg("M:BEAM", "HIGH", "ANALOG");
     let stream = tokio_stream::iter(vec![ok_item]);
 
     let (tx, rx) = mpsc::channel(1);

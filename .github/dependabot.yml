@@ -5,6 +5,11 @@ updates:
     schedule: 
       interval: "weekly"
     groups:
+      major-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
       minor-patch-updates:
         patterns:
           - "*"
@@ -14,4 +19,8 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "monthly"
